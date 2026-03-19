@@ -1,0 +1,455 @@
+package services
+
+import (
+	"context"
+	"fmt"
+	"log"
+	"sync"
+	"time"
+
+	"ctfd-downloader/pkg/client"
+	"ctfd-downloader/pkg/models"
+	"ctfd-downloader/pkg/utils"
+
+	"golang.org/x/time/rate"
+)
+
+type DownloadService struct {
+	client     *client.CTFdClient
+	filesystem *FileSystemService
+	config     *DownloadConfig
+	limiter    *rate.Limiter
+	stats      *models.DownloadStats
+	statsMutex sync.RWMutex
+}
+
+type DownloadConfig struct {
+	MaxWorkers     int
+	RateLimit      int // requests per second
+	RetryCount     int
+	RetryDelay     time.Duration
+	IncludeHints   bool
+	IncludeSolves  bool
+	SkipExisting   bool
+	OverwriteFiles bool
+	FileWorkers    int // separate worker pool for file downloads
+}
+
+func DefaultDownloadConfig() *DownloadConfig {
+	return &DownloadConfig{
+		MaxWorkers:     5,
+		RateLimit:      10,
+		RetryCount:     3,
+		RetryDelay:     1 * time.Second,
+		IncludeHints:   false,
+		IncludeSolves:  false,
+		SkipExisting:   true,
+		OverwriteFiles: false,
+		FileWorkers:    3,
+	}
+}
+
+func NewDownloadService(ctfdClient *client.CTFdClient, filesystem *FileSystemService, config *DownloadConfig) *DownloadService {
+	if config == nil {
+		config = DefaultDownloadConfig()
+	}
+
+	limiter := rate.NewLimiter(rate.Limit(config.RateLimit), config.RateLimit*2)
+
+	stats := &models.DownloadStats{
+		StartTime: time.Now(),
+	}
+
+	return &DownloadService{
+		client:     ctfdClient,
+		filesystem: filesystem,
+		config:     config,
+		limiter:    limiter,
+		stats:      stats,
+	}
+}
+
+func (ds *DownloadService) DownloadAllChallenges(ctx context.Context) (*models.DownloadStats, error) {
+	ds.resetStats()
+
+	log.Println("Fetching challenge list...")
+
+	challenges, err := ds.client.GetChallenges()
+	if err != nil {
+		ds.addError(fmt.Sprintf("Failed to fetch challenges: %v", err))
+		return ds.getStats(), err
+	}
+
+	ds.stats.TotalChallenges = len(challenges)
+	log.Printf("Found %d challenges", len(challenges))
+
+	challengeJobs := make(chan models.Challenge, len(challenges))
+	results := make(chan models.DownloadResult, len(challenges))
+
+	var wg sync.WaitGroup
+	for i := 0; i < ds.config.MaxWorkers; i++ {
+		wg.Add(1)
+		go ds.challengeWorker(ctx, challengeJobs, results, &wg)
+	}
+
+	go func() {
+		defer close(challengeJobs)
+		for _, challenge := range challenges {
+			select {
+			case challengeJobs <- challenge:
+			case <-ctx.Done():
+				return
+			}
+		}
+	}()
+
+	go func() {
+		wg.Wait()
+		close(results)
+	}()
+
+	var processedCount int
+	for result := range results {
+		processedCount++
+		if result.Success {
+			if result.Skipped {
+				ds.incrementSkipped()
+				log.Printf("[%d/%d] Skipped: %s", processedCount, len(challenges), result.Name)
+			} else {
+				ds.incrementDownloaded()
+				log.Printf("[%d/%d] Successfully downloaded: %s", processedCount, len(challenges), result.Name)
+			}
+		} else {
+			ds.incrementFailed()
+			errorMsg := fmt.Sprintf("Failed to download %s: %v", result.Name, result.Error)
+			ds.addError(errorMsg)
+			log.Printf("[%d/%d] %s", processedCount, len(challenges), errorMsg)
+		}
+
+		select {
+		case <-ctx.Done():
+			log.Println("Download cancelled")
+			return ds.getStats(), ctx.Err()
+		default:
+		}
+	}
+
+	ds.stats.EndTime = time.Now()
+	ds.stats.Duration = ds.stats.EndTime.Sub(ds.stats.StartTime)
+
+	finalStats := ds.getStats()
+	log.Printf("Download completed: %d successful, %d skipped, %d failed, %d files (%s) in %v",
+		finalStats.Downloaded, finalStats.Skipped, finalStats.Failed, finalStats.FilesDownloaded,
+		formatBytes(finalStats.TotalSize), finalStats.Duration)
+
+	return finalStats, nil
+}
+
+func (ds *DownloadService) challengeWorker(ctx context.Context, jobs <-chan models.Challenge, results chan<- models.DownloadResult, wg *sync.WaitGroup) {
+	defer wg.Done()
+
+	for job := range jobs {
+		select {
+		case <-ctx.Done():
+			return
+		default:
+		}
+
+		result := ds.processChallenge(ctx, job)
+
+		select {
+		case results <- result:
+		case <-ctx.Done():
+			return
+		}
+	}
+}
+
+func (ds *DownloadService) processChallenge(ctx context.Context, challenge models.Challenge) models.DownloadResult {
+	result := models.DownloadResult{
+		ChallengeID: challenge.ID,
+		Name:        challenge.Name,
+		Success:     false,
+	}
+
+	var lastErr error
+	for attempt := 0; attempt < ds.config.RetryCount; attempt++ {
+		if attempt > 0 {
+			log.Printf("Retrying challenge %s (attempt %d/%d)", challenge.Name, attempt+1, ds.config.RetryCount)
+			select {
+			case <-time.After(ds.config.RetryDelay):
+			case <-ctx.Done():
+				result.Error = ctx.Err()
+				return result
+			}
+		}
+
+		if err := ds.limiter.Wait(ctx); err != nil {
+			result.Error = err
+			return result
+		}
+
+		if err := ds.downloadChallenge(ctx, &challenge, &result); err != nil {
+			lastErr = err
+			continue
+		}
+
+		result.Success = true
+		return result
+	}
+
+	result.Error = lastErr
+	return result
+}
+
+func (ds *DownloadService) downloadChallenge(ctx context.Context, challenge *models.Challenge, result *models.DownloadResult) error {
+	challengeDetail, err := ds.client.GetChallenge(challenge.ID)
+	if err != nil {
+		return fmt.Errorf("failed to get challenge details: %w", err)
+	}
+
+	if ds.config.SkipExisting {
+		if existing, exists, err := ds.filesystem.CheckExistingChallenge(challengeDetail); err != nil {
+			log.Printf("Warning: Could not check existing challenge %s: %v", challenge.Name, err)
+		} else if exists {
+			log.Printf("Skipping existing challenge: %s (downloaded %v)", challenge.Name, existing.DownloadedAt.Format("2006-01-02 15:04:05"))
+			result.OutputPath = fmt.Sprintf("%s/%s", sanitizeName(challengeDetail.Category), sanitizeName(challengeDetail.Name))
+			result.Skipped = true
+			return nil
+		}
+	}
+
+	challengeDir, err := ds.filesystem.CreateChallengeDirectory(challengeDetail)
+	if err != nil {
+		return fmt.Errorf("failed to create directory: %w", err)
+	}
+
+	result.OutputPath = challengeDir
+
+	var fileInfos []models.FileInfo
+	if len(challengeDetail.Files) > 0 {
+		fileInfos, err = ds.downloadChallengeFiles(ctx, challengeDetail.Files, challengeDir)
+		if err != nil {
+			return fmt.Errorf("failed to download files: %w", err)
+		}
+		result.Files = make([]string, len(fileInfos))
+		for i, fi := range fileInfos {
+			result.Files[i] = fi.Name
+		}
+	}
+
+	var hints []models.HintInfo
+	var solves []models.SolveInfo
+
+	if ds.config.IncludeHints && len(challengeDetail.Hints) > 0 {
+		for _, hint := range challengeDetail.Hints {
+			hintInfo := models.HintInfo{
+				ID:      hint.ID,
+				Title:   hint.Title,
+				Cost:    hint.Cost,
+				Content: hint.Content,
+			}
+			hints = append(hints, hintInfo)
+		}
+	}
+
+	if ds.config.IncludeSolves {
+		solvesData, err := ds.client.GetChallengeSolves(challenge.ID)
+		if err != nil {
+			log.Printf("Warning: Could not fetch solves for %s: %v", challenge.Name, err)
+		} else {
+			for _, solve := range solvesData {
+				solveInfo := models.SolveInfo{
+					Team: solve.Name,
+					User: solve.Account,
+					Date: solve.Date,
+				}
+				solves = append(solves, solveInfo)
+			}
+		}
+	}
+
+	if err := ds.filesystem.SaveChallengeMetadata(challengeDetail, challengeDir, fileInfos, hints, solves); err != nil {
+		return fmt.Errorf("failed to save metadata: %w", err)
+	}
+
+	if err := ds.filesystem.SaveChallengeREADME(challengeDetail, challengeDir, fileInfos); err != nil {
+		return fmt.Errorf("failed to save README: %w", err)
+	}
+
+	return nil
+}
+
+func (ds *DownloadService) downloadChallengeFiles(ctx context.Context, fileURLs []string, challengeDir string) ([]models.FileInfo, error) {
+	if len(fileURLs) == 0 {
+		return nil, nil
+	}
+
+	fileJobs := make(chan string, len(fileURLs))
+	fileResults := make(chan fileDownloadResult, len(fileURLs))
+
+	var wg sync.WaitGroup
+	workerCount := ds.config.FileWorkers
+	if workerCount > len(fileURLs) {
+		workerCount = len(fileURLs)
+	}
+
+	for i := 0; i < workerCount; i++ {
+		wg.Add(1)
+		go ds.fileWorker(ctx, fileJobs, fileResults, challengeDir, &wg)
+	}
+
+	go func() {
+		defer close(fileJobs)
+		for _, fileURL := range fileURLs {
+			select {
+			case fileJobs <- fileURL:
+			case <-ctx.Done():
+				return
+			}
+		}
+	}()
+
+	go func() {
+		wg.Wait()
+		close(fileResults)
+	}()
+
+	var fileInfos []models.FileInfo
+	var errs []error
+
+	for result := range fileResults {
+		if result.err != nil {
+			errs = append(errs, result.err)
+			ds.incrementFilesFailed()
+		} else {
+			fileInfos = append(fileInfos, result.info)
+			ds.incrementFilesDownloaded()
+			ds.addTotalSize(result.info.Size)
+		}
+	}
+
+	if len(errs) > 0 {
+		return fileInfos, fmt.Errorf("some files failed to download: %v", errs)
+	}
+
+	return fileInfos, nil
+}
+
+type fileDownloadResult struct {
+	info models.FileInfo
+	err  error
+}
+
+func (ds *DownloadService) fileWorker(ctx context.Context, jobs <-chan string, results chan<- fileDownloadResult, challengeDir string, wg *sync.WaitGroup) {
+	defer wg.Done()
+
+	for fileURL := range jobs {
+		select {
+		case <-ctx.Done():
+			return
+		default:
+		}
+
+		if err := ds.limiter.Wait(ctx); err != nil {
+			results <- fileDownloadResult{err: err}
+			continue
+		}
+
+		var lastErr error
+		var fileInfo models.FileInfo
+
+		for attempt := 0; attempt < ds.config.RetryCount; attempt++ {
+			if attempt > 0 {
+				select {
+				case <-time.After(ds.config.RetryDelay):
+				case <-ctx.Done():
+					results <- fileDownloadResult{err: ctx.Err()}
+					return
+				}
+			}
+
+			fileInfo, lastErr = ds.filesystem.DownloadFile(fileURL, challengeDir, ds.client.DownloadFileToWriter)
+			if lastErr == nil {
+				break
+			}
+		}
+
+		if lastErr != nil {
+			results <- fileDownloadResult{err: fmt.Errorf("failed to download %s after %d attempts: %w", fileURL, ds.config.RetryCount, lastErr)}
+		} else {
+			results <- fileDownloadResult{info: fileInfo}
+		}
+	}
+}
+
+func (ds *DownloadService) resetStats() {
+	ds.statsMutex.Lock()
+	defer ds.statsMutex.Unlock()
+
+	ds.stats = &models.DownloadStats{
+		StartTime: time.Now(),
+	}
+}
+
+func (ds *DownloadService) getStats() *models.DownloadStats {
+	ds.statsMutex.RLock()
+	defer ds.statsMutex.RUnlock()
+
+	statsCopy := *ds.stats
+	return &statsCopy
+}
+
+func (ds *DownloadService) incrementDownloaded() {
+	ds.statsMutex.Lock()
+	defer ds.statsMutex.Unlock()
+	ds.stats.Downloaded++
+}
+
+func (ds *DownloadService) incrementSkipped() {
+	ds.statsMutex.Lock()
+	defer ds.statsMutex.Unlock()
+	ds.stats.Skipped++
+}
+
+func (ds *DownloadService) incrementFailed() {
+	ds.statsMutex.Lock()
+	defer ds.statsMutex.Unlock()
+	ds.stats.Failed++
+}
+
+func (ds *DownloadService) incrementFilesDownloaded() {
+	ds.statsMutex.Lock()
+	defer ds.statsMutex.Unlock()
+	ds.stats.FilesDownloaded++
+}
+
+func (ds *DownloadService) incrementFilesFailed() {
+	ds.statsMutex.Lock()
+	defer ds.statsMutex.Unlock()
+	ds.stats.FilesFailed++
+}
+
+func (ds *DownloadService) addTotalSize(size int64) {
+	ds.statsMutex.Lock()
+	defer ds.statsMutex.Unlock()
+	ds.stats.TotalSize += size
+}
+
+func (ds *DownloadService) addError(errorMsg string) {
+	ds.statsMutex.Lock()
+	defer ds.statsMutex.Unlock()
+	ds.stats.Errors = append(ds.stats.Errors, errorMsg)
+}
+
+func (ds *DownloadService) GetStats() *models.DownloadStats {
+	return ds.getStats()
+}
+
+func formatBytes(bytes int64) string {
+	return utils.FormatBytes(bytes)
+}
+
+func sanitizeName(name string) string {
+	return utils.SanitizeName(name)
+}

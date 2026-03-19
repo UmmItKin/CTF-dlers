@@ -1,0 +1,19 @@
+# Example configuration for CTFd Challenge Downloader
+# Copy this file and customize for your CTF instance
+
+# CTFd instance settings
+base_url: "https://demo.ctfd.io"
+token: "ctfd_your_token_here"
+
+# Download settings
+output_dir: "./challenges"
+max_workers: 5
+rate_limit: 10  # requests per second
+
+# Retry settings
+retry_count: 3
+retry_delay: "1s"  # 1s, 2m, 3h, etc.
+
+# Additional data
+include_hints: false
+include_solves: false
