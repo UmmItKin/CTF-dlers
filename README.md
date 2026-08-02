@@ -1,90 +1,60 @@
+<div align="center">
+
 # CTF-dlers
 
-A high-performance CLI tool for downloading challenges from CTFd platforms with concurrent processing.
+Concurrent CLI downloader for **CTFd** challenges — pulls every challenge over the CTFd API into a tidy `challenges/<category>/<name>/` tree with metadata, README, and files, behind a live progress dashboard.
 
-## Features
+[![Go](https://img.shields.io/badge/Go-1.25+-00ADD8?logo=go&logoColor=white)](https://go.dev)
+[![Go Report Card](https://goreportcard.com/badge/github.com/UmmItKin/CTF-dlers)](https://goreportcard.com/report/github.com/UmmItKin/CTF-dlers)
+[![License: MIT](https://img.shields.io/badge/License-MIT-blue.svg)](LICENSE)
+![Platform](https://img.shields.io/badge/platform-linux%20|%20macos%20|%20windows-lightgrey)
 
-- **Concurrent Downloads**: Uses goroutines and worker pools for parallel processing
-- **Bearer Token Authentication**: Access using CTFd access tokens
-- **Directory Mapping**: Creates organized folder structure: `./challenges/[category]/[challenge_name]/`
-- **Metadata Extraction**: Generates `challenge.yml` and `README.md` for each challenge
-- **Robust Error Handling**: Handles authentication failures, rate limiting, and network errors
-- **Rate Limiting**: Configurable request rate limiting to respect server limits
-- **Resume Support**: Skip existing challenges to resume interrupted downloads
+</div>
 
-## Installation
+## Install
 
 ```bash
 git clone https://github.com/UmmItKin/CTF-dlers
 cd CTF-dlers
-just install
+just install        # or: ./install.sh [dir]   (defaults to /usr/local/bin)
 ```
 
-Or:
-
-```bash
-./install.sh
-```
+Needs Go 1.25+. Build only: `just build` → `./CTF-dlers`.
 
 ## Usage
 
 ```bash
-# Download all challenges
-./ctfd-downloader -url https://ctf.example.com -token ctfd_abc123def456
+# Download every challenge
+./CTF-dlers -url https://ctf.example.com -token ctfd_abc123
 
-# Test connection
-./ctfd-downloader -url https://ctf.example.com -token ctfd_abc123def456 -test
-
-# Dry run to see what would be downloaded
-./ctfd-downloader -url https://ctf.example.com -token ctfd_abc123def456 -dry-run
+# Check auth, or preview without downloading
+./CTF-dlers -url https://ctf.example.com -token ctfd_abc123 -test
+./CTF-dlers -url https://ctf.example.com -token ctfd_abc123 -dry-run
 ```
 
-### Advanced Usage
+Get a token from **CTFd → Settings → Access Tokens**. `-url`/`-token` can also come from
+`CTFD_URL` / `CTFD_TOKEN`, or from a config file. After a run you're prompted to bundle
+everything into a `.tar.gz` to share with teammates.
 
-```bash
-# Use configuration file
-./ctfd-downloader -config config.yml
-
-# Customize workers and rate limiting
-./ctfd-downloader -url https://ctf.example.com -token $CTFD_TOKEN -workers 10 -rate-limit 15
-
-# Include hints and solves
-./ctfd-downloader -url https://ctf.example.com -token $CTFD_TOKEN -hints -solves
-```
-
-### Command Line Options
+### Options
 
 | Flag | Description | Default |
 |------|-------------|---------|
-| `-url` | CTFd base URL (required) | - |
-| `-token` | CTFd access token (required) | - |
+| `-url`, `-token` | CTFd base URL and access token (required) | — |
 | `-output` | Output directory | `./challenges` |
-| `-config` | Configuration file path | - |
-| `-workers` | Number of concurrent workers | `5` |
-| `-rate-limit` | Rate limit (requests per second) | `10` |
-| `-retry` | Number of retry attempts | `3` |
-| `-retry-delay` | Delay between retries | `1s` |
-| `-hints` | Include challenge hints | `false` |
-| `-solves` | Include challenge solves | `false` |
-| `-skip-existing` | Skip existing challenges | `true` |
-| `-overwrite` | Overwrite existing files | `false` |
-| `-verbose` | Enable verbose logging | `false` |
-| `-test` | Test connection and exit | `false` |
-| `-dry-run` | Show what would be downloaded | `false` |
-| `-version` | Show version information | `false` |
+| `-config` | YAML config file (see below) | — |
+| `-workers` | Concurrent challenge workers | `5` |
+| `-rate-limit` | Requests per second | `10` |
+| `-retry`, `-retry-delay` | Retry attempts / delay between them | `3`, `1s` |
+| `-hints`, `-solves` | Include hints / solves in metadata | `false` |
+| `-skip-existing`, `-overwrite` | Skip already-downloaded / overwrite files | `true`, `false` |
+| `-verbose`, `-dry-run`, `-test`, `-version` | Logging / preview / auth check / version | `false` |
 
-### Environment Variables
-
-- `CTFD_URL`: CTFd base URL
-- `CTFD_TOKEN`: CTFd access token
-
-## Configuration File
-
-Create a YAML configuration file to avoid passing parameters on command line:
+### Config file
 
 ```yaml
 base_url: "https://ctf.example.com"
-token: "ctfd_abc123def456"
+token: "ctfd_abc123"
 output_dir: "./challenges"
 max_workers: 5
 rate_limit: 10
@@ -94,112 +64,19 @@ include_hints: false
 include_solves: false
 ```
 
-## Output Structure
+CLI flags override the config file, which overrides defaults. Run with `-config config.yml`.
 
-The tool creates the following directory structure:
+## Output
 
 ```
 challenges/
-├── category1/
-│   ├── challenge1/
-│   │   ├── challenge.yml      # Challenge metadata
-│   │   ├── README.md         # Human-readable description
-│   │   ├── file1.zip         # Challenge files
-│   │   └── file2.txt
-│   └── challenge2/
-│       ├── challenge.yml
-│       ├── README.md
-│       └── exploit.py
-└── category2/
-    └── challenge3/
-        ├── challenge.yml
-        ├── README.md
-        ├── binary
-        └── source.c
-```
-
-### Metadata Format
-
-Each challenge includes a `challenge.yml` file with comprehensive metadata:
-
-```yaml
-id: 123
-name: "Buffer Overflow 1"
-description: "Find the vulnerability in this program..."
-category: "pwn"
-value: 100
-tags: ["binary", "stack"]
-type: "standard"
-state: "visible"
-author: "challenge_author"
-connection_info: "nc pwn.example.com 1337"
-max_attempts: 0
-files:
-  - name: "vuln.c"
-    url: "https://ctf.example.com/files/abc123.c"
-    path: "vuln.c"
-    size: 1024
-    sha1: "da39a3ee5e6b4b0d3255bfef95601890afd80709"
-downloaded_at: "2024-01-15T10:30:00Z"
-```
-
-## Authentication
-
-The tool uses Bearer token authentication. Generate your token from:
-1. Log into your CTFd instance
-2. Go to Settings → Access Tokens
-3. Generate a new token
-4. Use the token with the `-token` flag or `CTFD_TOKEN` environment variable
-
-## Error Handling
-
-The tool handles various error conditions:
-
-- **401 Unauthorized**: Invalid or expired token
-- **403 Forbidden**: Insufficient permissions or CTF not started
-- **429 Rate Limited**: Automatic retry with backoff
-- **5xx Server Errors**: Automatic retry with exponential backoff
-- **Network Errors**: Configurable retry with delay
-
-## Performance Tuning
-
-Adjust these parameters based on your server and network:
-
-- **Workers**: Number of concurrent challenge processors (`-workers`)
-- **Rate Limit**: Requests per second to avoid overwhelming the server (`-rate-limit`)
-- **File Workers**: Concurrent file downloads per challenge (hardcoded to 3)
-- **Retry Settings**: Number and delay for failed requests (`-retry`, `-retry-delay`)
-
-## Examples
-
-### Download from a public CTF
-```bash
-export CTFD_TOKEN="ctfd_abc123def456"
-./ctfd-downloader -url https://demo.ctfd.io -test
-./ctfd-downloader -url https://demo.ctfd.io -dry-run
-./ctfd-downloader -url https://demo.ctfd.io
-```
-
-### High-performance download
-```bash
-./ctfd-downloader \
-  -url https://ctf.example.com \
-  -token $CTFD_TOKEN \
-  -workers 15 \
-  -rate-limit 25 \
-  -output /opt/challenges
-```
-
-### Complete challenge archive
-```bash
-./ctfd-downloader \
-  -url https://ctf.example.com \
-  -token $CTFD_TOKEN \
-  -hints \
-  -solves \
-  -verbose
+└── <category>/
+    └── <challenge>/
+        ├── challenge.yml   # metadata (id, value, tags, files w/ sha1, hints, solves…)
+        ├── README.md       # human-readable description
+        └── <files…>        # challenge attachments
 ```
 
 ## License
 
-This project is licensed under the MIT License.
+MIT — see [LICENSE](LICENSE).
