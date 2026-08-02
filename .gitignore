@@ -33,3 +33,4 @@ go.work.sum
 
 challenges
 CTF-dlers
+*.tar.gz
