@@ -34,6 +34,19 @@ const (
 	appName = "CTFd Challenge Downloader"
 )
 
+const banner = `
+ ██████╗████████╗███████╗    ██████╗ ██╗     ███████╗██████╗ ███████╗
+██╔════╝╚══██╔══╝██╔════╝    ██╔══██╗██║     ██╔════╝██╔══██╗██╔════╝
+██║        ██║   █████╗█████╗██║  ██║██║     █████╗  ██████╔╝███████╗
+██║        ██║   ██╔══╝╚════╝██║  ██║██║     ██╔══╝  ██╔══██╗╚════██║
+╚██████╗   ██║   ██║         ██████╔╝███████╗███████╗██║  ██║███████║
+ ╚═════╝   ╚═╝   ╚═╝         ╚═════╝ ╚══════╝╚══════╝╚═╝  ╚═╝╚══════╝`
+
+func printBanner() {
+	fmt.Println(text.FgHiCyan.Sprint(banner))
+	fmt.Printf("  %s\n\n", text.Colors{text.Faint}.Sprintf("%s  v%s", appName, version))
+}
+
 var (
 	baseURL       = flag.String("url", "", "CTFd base URL (required)")
 	token         = flag.String("token", "", "CTFd access token (required)")
@@ -131,7 +144,8 @@ func main() {
 	ctx, stop := signal.NotifyContext(context.Background(), syscall.SIGINT, syscall.SIGTERM)
 	defer stop()
 
-	fmt.Printf("CTFd Downloader  ·  %s  ·  %s\n\n", config.BaseURL, config.OutputDir)
+	printBanner()
+	fmt.Printf("  %s  ·  %s\n\n", text.FgHiWhite.Sprint(config.BaseURL), config.OutputDir)
 
 	rows, err := runWithDashboard(ctx, downloadService)
 	if err != nil {
