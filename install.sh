@@ -12,4 +12,4 @@ else
     sudo cp -v CTF-dlers "$INSTALL_DIR/"
 fi
 
-echo "✅ Installed to $INSTALL_DIR/CTF-dlers"
+echo "Installed to $INSTALL_DIR/CTF-dlers"
