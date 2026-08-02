@@ -46,7 +46,7 @@ func (fs *FileSystemService) SaveChallengeMetadata(challenge *models.ChallengeDe
 		Description:    challenge.Description,
 		Category:       challenge.Category,
 		Value:          challenge.Value,
-		Tags:           []string(challenge.Tags), // Convert TagList to []string
+		Tags:           []string(challenge.Tags),
 		Type:           challenge.Type,
 		State:          challenge.State,
 		Author:         challenge.Attribution,
@@ -97,37 +97,49 @@ func (fs *FileSystemService) DownloadFile(fileURL, challengeDir string, download
 	if err != nil {
 		return models.FileInfo{}, fmt.Errorf("failed to extract filename from URL %s: %w", fileURL, err)
 	}
+	filename = utils.SanitizeName(filename) // guard against path traversal
 
 	filePath := filepath.Join(challengeDir, filename)
 
-	file, err := os.Create(filePath)
+	// temp file + rename: a failed re-download won't destroy a prior file
+	tmp, err := os.CreateTemp(challengeDir, ".download-*")
 	if err != nil {
-		return models.FileInfo{}, fmt.Errorf("failed to create file %s: %w", filePath, err)
+		return models.FileInfo{}, fmt.Errorf("failed to create temp file in %s: %w", challengeDir, err)
 	}
-	defer file.Close()
+	tmpPath := tmp.Name()
+	success := false
+	defer func() {
+		if !success {
+			tmp.Close()
+			os.Remove(tmpPath)
+		}
+	}()
 
-	err = downloader(fileURL, file)
-	if err != nil {
-		os.Remove(filePath) // Clean up on failure
+	// hash while writing (no re-read)
+	hash := sha1.New()
+	if err := downloader(fileURL, io.MultiWriter(tmp, hash)); err != nil {
 		return models.FileInfo{}, fmt.Errorf("failed to download file: %w", err)
 	}
 
-	fileInfo, err := file.Stat()
+	info, err := tmp.Stat()
 	if err != nil {
 		return models.FileInfo{}, fmt.Errorf("failed to get file info: %w", err)
 	}
+	size := info.Size()
 
-	file.Seek(0, 0) // Reset to beginning
-	hash := sha1.New()
-	if _, err := io.Copy(hash, file); err != nil {
-		return models.FileInfo{}, fmt.Errorf("failed to calculate hash: %w", err)
+	if err := tmp.Close(); err != nil {
+		return models.FileInfo{}, fmt.Errorf("failed to flush file: %w", err)
 	}
+	if err := os.Rename(tmpPath, filePath); err != nil {
+		return models.FileInfo{}, fmt.Errorf("failed to move file into place: %w", err)
+	}
+	success = true
 
 	return models.FileInfo{
 		Name: filename,
 		URL:  fileURL,
-		Path: filename, // Relative path within challenge directory
-		Size: fileInfo.Size(),
+		Path: filename,
+		Size: size,
 		SHA1: fmt.Sprintf("%x", hash.Sum(nil)),
 	}, nil
 }
@@ -178,17 +190,23 @@ func (fs *FileSystemService) loadChallengeMetadata(yamlPath string) (*models.Cha
 	return &metadata, nil
 }
 
-func (fs *FileSystemService) saveYAML(path string, data interface{}) error {
+func (fs *FileSystemService) saveYAML(path string, data interface{}) (err error) {
 	file, err := os.Create(path)
 	if err != nil {
 		return err
 	}
-	defer file.Close()
+	defer func() {
+		if cerr := file.Close(); cerr != nil && err == nil {
+			err = cerr // surface close errors
+		}
+	}()
 
 	encoder := yaml.NewEncoder(file)
-	defer encoder.Close()
-
-	return encoder.Encode(data)
+	if err = encoder.Encode(data); err != nil {
+		encoder.Close()
+		return err
+	}
+	return encoder.Close()
 }
 
 func (fs *FileSystemService) generateREADMEContent(challenge *models.ChallengeDetailed, fileInfos []models.FileInfo) string {

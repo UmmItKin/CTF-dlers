@@ -2,6 +2,7 @@ package main
 
 import (
 	"context"
+	"errors"
 	"flag"
 	"fmt"
 	"log"
@@ -14,6 +15,7 @@ import (
 	"ctfd-downloader/pkg/client"
 	"ctfd-downloader/pkg/models"
 	"ctfd-downloader/pkg/services"
+	"ctfd-downloader/pkg/utils"
 
 	"gopkg.in/yaml.v3"
 )
@@ -50,11 +52,6 @@ func main() {
 		os.Exit(0)
 	}
 
-	retryDelayDuration, err := time.ParseDuration(*retryDelay)
-	if err != nil {
-		log.Fatalf("Invalid retry delay: %v", err)
-	}
-
 	config, err := loadConfig()
 	if err != nil {
 		log.Fatalf("Failed to load configuration: %v", err)
@@ -63,6 +60,9 @@ func main() {
 	if err := validateConfig(config); err != nil {
 		log.Fatalf("Configuration error: %v", err)
 	}
+
+	// use merged value so config-file retry_delay isn't ignored
+	retryDelayDuration, _ := time.ParseDuration(config.RetryDelay)
 
 	if *verbose {
 		log.Printf("Configuration: %+v", config)
@@ -92,10 +92,6 @@ func main() {
 		return
 	}
 
-	if err := os.MkdirAll(config.OutputDir, 0755); err != nil {
-		log.Fatalf("Failed to create output directory: %v", err)
-	}
-
 	filesystem := services.NewFileSystemService(config.OutputDir)
 
 	downloadConfig := &services.DownloadConfig{
@@ -113,10 +109,14 @@ func main() {
 	downloadService := services.NewDownloadService(ctfdClient, filesystem, downloadConfig)
 
 	if *dryRun {
-		if err := performDryRun(ctfdClient); err != nil {
+		if err := performDryRun(ctfdClient, config.OutputDir); err != nil {
 			log.Fatalf("Dry run failed: %v", err)
 		}
 		return
+	}
+
+	if err := os.MkdirAll(config.OutputDir, 0755); err != nil {
+		log.Fatalf("Failed to create output directory: %v", err)
 	}
 
 	ctx, cancel := context.WithCancel(context.Background())
@@ -136,7 +136,7 @@ func main() {
 	log.Printf("Workers: %d, Rate limit: %d req/s", config.MaxWorkers, config.RateLimit)
 
 	stats, err := downloadService.DownloadAllChallenges(ctx)
-	if err != nil && err != context.Canceled {
+	if err != nil && !errors.Is(err, context.Canceled) {
 		log.Fatalf("Download failed: %v", err)
 	}
 
@@ -167,32 +167,35 @@ func loadConfig() (*models.Config, error) {
 		mergeConfigs(config, fileConfig)
 	}
 
-	if *baseURL != "" {
+	// flags override config only when explicitly set
+	set := map[string]bool{}
+	flag.Visit(func(f *flag.Flag) { set[f.Name] = true })
+	if set["url"] {
 		config.BaseURL = *baseURL
 	}
-	if *token != "" {
+	if set["token"] {
 		config.Token = *token
 	}
-	if *outputDir != "./challenges" {
+	if set["output"] {
 		config.OutputDir = *outputDir
 	}
-	if *workers != 5 {
+	if set["workers"] {
 		config.MaxWorkers = *workers
 	}
-	if *rateLimit != 10 {
+	if set["rate-limit"] {
 		config.RateLimit = *rateLimit
 	}
-	if *retryCount != 3 {
+	if set["retry"] {
 		config.RetryCount = *retryCount
 	}
-	if *retryDelay != "1s" {
+	if set["retry-delay"] {
 		config.RetryDelay = *retryDelay
 	}
-	if *includeHints {
-		config.IncludeHints = true
+	if set["hints"] {
+		config.IncludeHints = *includeHints
 	}
-	if *includeSolves {
-		config.IncludeSolves = true
+	if set["solves"] {
+		config.IncludeSolves = *includeSolves
 	}
 
 	if config.BaseURL == "" {
@@ -277,7 +280,7 @@ func validateConfig(config *models.Config) error {
 	return nil
 }
 
-func performDryRun(ctfdClient *client.CTFdClient) error {
+func performDryRun(ctfdClient *client.CTFdClient, outputDir string) error {
 	log.Println("Performing dry run...")
 
 	challenges, err := ctfdClient.GetChallenges()
@@ -322,52 +325,34 @@ func performDryRun(ctfdClient *client.CTFdClient) error {
 	}
 
 	fmt.Printf("\nDirectory structure that would be created:\n")
-	fmt.Printf("%s/\n", *outputDir)
+	fmt.Printf("%s/\n", outputDir)
 	for category := range categoryCounts {
-		fmt.Printf("├── %s/\n", sanitizeDirName(category))
+		fmt.Printf("├── %s/\n", utils.SanitizeName(category))
 	}
 
 	return nil
 }
 
 func printStats(stats *models.DownloadStats) {
-	fmt.Printf("\n" + strings.Repeat("=", 50) + "\n")
-	fmt.Printf("Download Statistics\n")
-	fmt.Printf(strings.Repeat("=", 50) + "\n")
+	sep := strings.Repeat("=", 50)
+	fmt.Println("\n" + sep)
+	fmt.Println("Download Statistics")
+	fmt.Println(sep)
 	fmt.Printf("Total challenges: %d\n", stats.TotalChallenges)
 	fmt.Printf("Downloaded: %d\n", stats.Downloaded)
 	fmt.Printf("Failed: %d\n", stats.Failed)
 	fmt.Printf("Total files: %d\n", stats.TotalFiles)
 	fmt.Printf("Files downloaded: %d\n", stats.FilesDownloaded)
 	fmt.Printf("Files failed: %d\n", stats.FilesFailed)
-	fmt.Printf("Total size: %s\n", formatSize(stats.TotalSize))
+	fmt.Printf("Total size: %s\n", utils.FormatBytes(stats.TotalSize))
 	fmt.Printf("Duration: %v\n", stats.Duration)
 
 	if stats.Duration > 0 && stats.FilesDownloaded > 0 {
 		avgSpeed := float64(stats.TotalSize) / stats.Duration.Seconds()
-		fmt.Printf("Average speed: %s/s\n", formatSize(int64(avgSpeed)))
+		fmt.Printf("Average speed: %s/s\n", utils.FormatBytes(int64(avgSpeed)))
 	}
 
-	fmt.Printf(strings.Repeat("=", 50) + "\n")
-}
-
-func formatSize(bytes int64) string {
-	const unit = 1024
-	if bytes < unit {
-		return fmt.Sprintf("%d B", bytes)
-	}
-
-	div, exp := int64(unit), 0
-	for n := bytes / unit; n >= unit; n /= unit {
-		div *= unit
-		exp++
-	}
-
-	return fmt.Sprintf("%.1f %cB", float64(bytes)/float64(div), "KMGTPE"[exp])
-}
-
-func sanitizeDirName(name string) string {
-	return strings.ReplaceAll(name, "/", "_")
+	fmt.Println(sep)
 }
 
 func init() {

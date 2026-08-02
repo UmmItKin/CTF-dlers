@@ -1,7 +1,9 @@
 package client
 
 import (
+	"context"
 	"encoding/json"
+	"errors"
 	"fmt"
 	"io"
 	"net/http"
@@ -18,7 +20,6 @@ import (
 
 const (
 	challengesEndpoint  = "/api/v1/challenges"
-	filesEndpoint       = "/files"
 	authorizationHeader = "Authorization"
 	userAgentHeader     = "User-Agent"
 	contentTypeHeader   = "Content-Type"
@@ -30,10 +31,9 @@ const (
 )
 
 type CTFdClient struct {
-	client  *resty.Client
-	baseURL string
-	token   string
-	config  *ClientConfig
+	client   *resty.Client
+	baseHost string
+	token    string
 }
 
 type ClientConfig struct {
@@ -71,17 +71,17 @@ func NewCTFdClient(config *ClientConfig) (*CTFdClient, error) {
 		return nil, fmt.Errorf("authentication token is required")
 	}
 
-	_, err := url.Parse(config.BaseURL)
-	if err != nil {
-		return nil, fmt.Errorf("invalid base URL: %w", err)
+	parsed, err := url.ParseRequestURI(config.BaseURL)
+	if err != nil || parsed.Host == "" || (parsed.Scheme != "http" && parsed.Scheme != "https") {
+		return nil, fmt.Errorf("invalid base URL %q: must be an absolute http(s) URL", config.BaseURL)
 	}
 
 	client := resty.New()
 	client.SetBaseURL(strings.TrimSuffix(config.BaseURL, "/"))
 	client.SetTimeout(config.Timeout)
 	client.SetHeader(userAgentHeader, config.UserAgent)
-	client.SetHeader(authorizationHeader, fmt.Sprintf("Bearer %s", config.Token))
 	client.SetHeader(contentTypeHeader, contentTypeJSON)
+	// auth is attached per-request so the token never leaks to a foreign host
 
 	client.SetRetryCount(config.RetryCount)
 	client.SetRetryWaitTime(config.RetryDelay)
@@ -89,6 +89,10 @@ func NewCTFdClient(config *ClientConfig) (*CTFdClient, error) {
 
 	client.AddRetryCondition(func(r *resty.Response, err error) bool {
 		if err != nil {
+			// don't retry cancellation
+			if errors.Is(err, context.Canceled) || errors.Is(err, context.DeadlineExceeded) {
+				return false
+			}
 			return true
 		}
 		statusCode := r.StatusCode()
@@ -100,15 +104,28 @@ func NewCTFdClient(config *ClientConfig) (*CTFdClient, error) {
 	}
 
 	return &CTFdClient{
-		client:  client,
-		baseURL: config.BaseURL,
-		token:   config.Token,
-		config:  config,
+		client:   client,
+		baseHost: parsed.Host,
+		token:    config.Token,
 	}, nil
 }
 
+// apiReq returns an authenticated request for CTFd API calls.
+func (c *CTFdClient) apiReq() *resty.Request {
+	return c.client.R().SetHeader(authorizationHeader, "Bearer "+c.token)
+}
+
+// fileReq attaches the token only for same-host or relative download URLs.
+func (c *CTFdClient) fileReq(fileURL string) *resty.Request {
+	r := c.client.R()
+	if u, err := url.Parse(fileURL); err == nil && (u.Host == "" || strings.EqualFold(u.Host, c.baseHost)) {
+		r.SetHeader(authorizationHeader, "Bearer "+c.token)
+	}
+	return r
+}
+
 func (c *CTFdClient) GetChallenges() ([]models.Challenge, error) {
-	resp, err := c.client.R().
+	resp, err := c.apiReq().
 		SetResult(&models.ChallengeListResponse{}).
 		Get(challengesEndpoint)
 
@@ -135,7 +152,7 @@ func (c *CTFdClient) GetChallenges() ([]models.Challenge, error) {
 func (c *CTFdClient) GetChallenge(challengeID int) (*models.ChallengeDetailed, error) {
 	endpoint := path.Join(challengesEndpoint, strconv.Itoa(challengeID))
 
-	resp, err := c.client.R().
+	resp, err := c.apiReq().
 		SetResult(&models.ChallengeDetailResponse{}).
 		Get(endpoint)
 
@@ -159,22 +176,8 @@ func (c *CTFdClient) GetChallenge(challengeID int) (*models.ChallengeDetailed, e
 	return &result.Data, nil
 }
 
-func (c *CTFdClient) DownloadFile(fileURL string) ([]byte, error) {
-	resp, err := c.client.R().Get(fileURL)
-
-	if err != nil {
-		return nil, fmt.Errorf("failed to download file from %s: %w", fileURL, err)
-	}
-
-	if err := c.checkResponseError(resp); err != nil {
-		return nil, fmt.Errorf("API error while downloading file from %s: %w", fileURL, err)
-	}
-
-	return resp.Body(), nil
-}
-
 func (c *CTFdClient) DownloadFileToWriter(fileURL string, writer io.Writer) error {
-	resp, err := c.client.R().
+	resp, err := c.fileReq(fileURL).
 		SetDoNotParseResponse(true).
 		Get(fileURL)
 
@@ -198,7 +201,7 @@ func (c *CTFdClient) DownloadFileToWriter(fileURL string, writer io.Writer) erro
 func (c *CTFdClient) GetChallengeSolves(challengeID int) ([]models.Solve, error) {
 	endpoint := path.Join(challengesEndpoint, strconv.Itoa(challengeID), "solves")
 
-	resp, err := c.client.R().
+	resp, err := c.apiReq().
 		SetResult(&models.SolvesResponse{}).
 		Get(endpoint)
 
@@ -223,7 +226,7 @@ func (c *CTFdClient) GetChallengeSolves(challengeID int) ([]models.Solve, error)
 }
 
 func (c *CTFdClient) TestConnection() error {
-	resp, err := c.client.R().
+	resp, err := c.apiReq().
 		SetResult(&models.ChallengeListResponse{}).
 		SetQueryParam("limit", "1").
 		Get(challengesEndpoint)
@@ -241,32 +244,29 @@ func (c *CTFdClient) TestConnection() error {
 
 func (c *CTFdClient) checkResponseError(resp *resty.Response) error {
 	statusCode := resp.StatusCode()
-
-	if err := c.checkHTTPStatusCode(statusCode); err != nil {
-		return err
+	if statusCode >= 200 && statusCode < 300 {
+		return nil
 	}
 
-	if statusCode != http.StatusOK {
-		var errorResp models.ErrorResponse
-		if err := json.Unmarshal(resp.Body(), &errorResp); err == nil && !errorResp.Success {
-			return fmt.Errorf("CTFd API error: %v", errorResp.Errors)
-		}
-
-		var simpleErrorResp models.SimpleErrorResponse
-		if err := json.Unmarshal(resp.Body(), &simpleErrorResp); err == nil && !simpleErrorResp.Success {
-			return fmt.Errorf("CTFd API error: %v", simpleErrorResp.Errors)
-		}
-
-		return fmt.Errorf("HTTP %d: %s", statusCode, string(resp.Body()))
+	// surface the server's error message if present
+	body := resp.Body()
+	var errorResp models.ErrorResponse
+	if err := json.Unmarshal(body, &errorResp); err == nil && len(errorResp.Errors) > 0 {
+		return fmt.Errorf("%w: %v", c.checkHTTPStatusCode(statusCode), errorResp.Errors)
+	}
+	var simpleErrorResp models.SimpleErrorResponse
+	if err := json.Unmarshal(body, &simpleErrorResp); err == nil && len(simpleErrorResp.Errors) > 0 {
+		return fmt.Errorf("%w: %v", c.checkHTTPStatusCode(statusCode), simpleErrorResp.Errors)
 	}
 
-	return nil
+	return c.checkHTTPStatusCode(statusCode)
 }
 
 func (c *CTFdClient) checkHTTPStatusCode(statusCode int) error {
-	switch statusCode {
-	case http.StatusOK:
+	if statusCode >= 200 && statusCode < 300 {
 		return nil
+	}
+	switch statusCode {
 	case http.StatusUnauthorized:
 		return fmt.Errorf("authentication failed (401): check your token")
 	case http.StatusForbidden:
@@ -292,12 +292,4 @@ func (c *CTFdClient) checkHTTPStatusCode(statusCode int) error {
 		}
 		return fmt.Errorf("unexpected status code: %d", statusCode)
 	}
-}
-
-func (c *CTFdClient) GetBaseURL() string {
-	return c.baseURL
-}
-
-func (c *CTFdClient) GetConfig() *ClientConfig {
-	return c.config
 }

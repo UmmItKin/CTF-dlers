@@ -81,17 +81,12 @@ type DownloadStats struct {
 	Errors          []string      `json:"errors,omitempty"`
 }
 
-type DownloadJob struct {
-	Challenge ChallengeDetailed `json:"challenge"`
-	OutputDir string            `json:"output_dir"`
-}
-
 type DownloadResult struct {
 	ChallengeID int      `json:"challenge_id"`
 	Name        string   `json:"name"`
 	Success     bool     `json:"success"`
 	Skipped     bool     `json:"skipped"`
-	Error       error    `json:"error,omitempty"`
+	Error       error    `json:"-"` // no useful JSON form
 	Files       []string `json:"files"`
 	OutputPath  string   `json:"output_path"`
 }

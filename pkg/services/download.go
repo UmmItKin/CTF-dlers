@@ -80,7 +80,7 @@ func (ds *DownloadService) DownloadAllChallenges(ctx context.Context) (*models.D
 		return ds.getStats(), err
 	}
 
-	ds.stats.TotalChallenges = len(challenges)
+	ds.setTotalChallenges(len(challenges))
 	log.Printf("Found %d challenges", len(challenges))
 
 	challengeJobs := make(chan models.Challenge, len(challenges))
@@ -134,8 +134,7 @@ func (ds *DownloadService) DownloadAllChallenges(ctx context.Context) (*models.D
 		}
 	}
 
-	ds.stats.EndTime = time.Now()
-	ds.stats.Duration = ds.stats.EndTime.Sub(ds.stats.StartTime)
+	ds.finalize()
 
 	finalStats := ds.getStats()
 	log.Printf("Download completed: %d successful, %d skipped, %d failed, %d files (%s) in %v",
@@ -277,6 +276,8 @@ func (ds *DownloadService) downloadChallenge(ctx context.Context, challenge *mod
 		return fmt.Errorf("failed to save README: %w", err)
 	}
 
+	ds.commitFileStats(len(challengeDetail.Files), fileInfos)
+
 	return nil
 }
 
@@ -318,14 +319,12 @@ func (ds *DownloadService) downloadChallengeFiles(ctx context.Context, fileURLs 
 	var fileInfos []models.FileInfo
 	var errs []error
 
+	// stats committed once by caller after success (avoids retry double-count)
 	for result := range fileResults {
 		if result.err != nil {
 			errs = append(errs, result.err)
-			ds.incrementFilesFailed()
 		} else {
 			fileInfos = append(fileInfos, result.info)
-			ds.incrementFilesDownloaded()
-			ds.addTotalSize(result.info.Size)
 		}
 	}
 
@@ -351,36 +350,41 @@ func (ds *DownloadService) fileWorker(ctx context.Context, jobs <-chan string, r
 		default:
 		}
 
-		if err := ds.limiter.Wait(ctx); err != nil {
-			results <- fileDownloadResult{err: err}
-			continue
-		}
+		fileInfo, err := ds.downloadFileWithRetry(ctx, fileURL, challengeDir)
 
-		var lastErr error
-		var fileInfo models.FileInfo
-
-		for attempt := 0; attempt < ds.config.RetryCount; attempt++ {
-			if attempt > 0 {
-				select {
-				case <-time.After(ds.config.RetryDelay):
-				case <-ctx.Done():
-					results <- fileDownloadResult{err: ctx.Err()}
-					return
-				}
-			}
-
-			fileInfo, lastErr = ds.filesystem.DownloadFile(fileURL, challengeDir, ds.client.DownloadFileToWriter)
-			if lastErr == nil {
-				break
-			}
-		}
-
-		if lastErr != nil {
-			results <- fileDownloadResult{err: fmt.Errorf("failed to download %s after %d attempts: %w", fileURL, ds.config.RetryCount, lastErr)}
-		} else {
-			results <- fileDownloadResult{info: fileInfo}
+		select {
+		case results <- fileDownloadResult{info: fileInfo, err: err}:
+		case <-ctx.Done():
+			return
 		}
 	}
+}
+
+// downloadFileWithRetry fetches one file, returning one (info, err) per call.
+func (ds *DownloadService) downloadFileWithRetry(ctx context.Context, fileURL, challengeDir string) (models.FileInfo, error) {
+	var lastErr error
+	var fileInfo models.FileInfo
+
+	for attempt := 0; attempt < ds.config.RetryCount; attempt++ {
+		if attempt > 0 {
+			select {
+			case <-time.After(ds.config.RetryDelay):
+			case <-ctx.Done():
+				return models.FileInfo{}, ctx.Err()
+			}
+		}
+
+		if err := ds.limiter.Wait(ctx); err != nil {
+			return models.FileInfo{}, err
+		}
+
+		fileInfo, lastErr = ds.filesystem.DownloadFile(fileURL, challengeDir, ds.client.DownloadFileToWriter)
+		if lastErr == nil {
+			return fileInfo, nil
+		}
+	}
+
+	return models.FileInfo{}, fmt.Errorf("failed to download %s after %d attempts: %w", fileURL, ds.config.RetryCount, lastErr)
 }
 
 func (ds *DownloadService) resetStats() {
@@ -418,22 +422,28 @@ func (ds *DownloadService) incrementFailed() {
 	ds.stats.Failed++
 }
 
-func (ds *DownloadService) incrementFilesDownloaded() {
+func (ds *DownloadService) setTotalChallenges(n int) {
 	ds.statsMutex.Lock()
 	defer ds.statsMutex.Unlock()
-	ds.stats.FilesDownloaded++
+	ds.stats.TotalChallenges = n
 }
 
-func (ds *DownloadService) incrementFilesFailed() {
+func (ds *DownloadService) finalize() {
 	ds.statsMutex.Lock()
 	defer ds.statsMutex.Unlock()
-	ds.stats.FilesFailed++
+	ds.stats.EndTime = time.Now()
+	ds.stats.Duration = ds.stats.EndTime.Sub(ds.stats.StartTime)
 }
 
-func (ds *DownloadService) addTotalSize(size int64) {
+// commitFileStats records a challenge's file counts once, after it succeeds.
+func (ds *DownloadService) commitFileStats(totalFiles int, fileInfos []models.FileInfo) {
 	ds.statsMutex.Lock()
 	defer ds.statsMutex.Unlock()
-	ds.stats.TotalSize += size
+	ds.stats.TotalFiles += totalFiles
+	ds.stats.FilesDownloaded += len(fileInfos)
+	for _, fi := range fileInfos {
+		ds.stats.TotalSize += fi.Size
+	}
 }
 
 func (ds *DownloadService) addError(errorMsg string) {

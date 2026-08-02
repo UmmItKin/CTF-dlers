@@ -33,12 +33,11 @@ func (t *TagList) UnmarshalJSON(data []byte) error {
 		return nil
 	}
 
-	var emptyObj interface{}
-	if err := json.Unmarshal(data, &emptyObj); err == nil {
-		*t = TagList([]string{})
-		return nil
+	// not an array: accept null/absent, surface malformed JSON
+	var other interface{}
+	if err := json.Unmarshal(data, &other); err != nil {
+		return err
 	}
-
 	*t = TagList([]string{})
 	return nil
 }
@@ -109,21 +108,6 @@ type RatingSummary struct {
 	Count int `json:"count"`
 }
 
-type AttemptRequest struct {
-	ChallengeID int    `json:"challenge_id"`
-	Submission  string `json:"submission"`
-}
-
-type AttemptResponse struct {
-	Success bool        `json:"success"`
-	Data    AttemptData `json:"data"`
-}
-
-type AttemptData struct {
-	Status  string `json:"status"`
-	Message string `json:"message"`
-}
-
 type SolvesResponse struct {
 	Success bool    `json:"success"`
 	Data    []Solve `json:"data"`
@@ -136,19 +120,6 @@ type Solve struct {
 	Account   string    `json:"account"`
 }
 
-type FileToken struct {
-	UserID int `json:"user_id"`
-	TeamID int `json:"team_id,omitempty"`
-	FileID int `json:"file_id"`
-}
-
-type ChallengeFile struct {
-	ID       int    `json:"id"`
-	Type     string `json:"type"`
-	Location string `json:"location"`
-	SHA1Sum  string `json:"sha1sum"`
-}
-
 type ErrorResponse struct {
 	Success bool                `json:"success"`
 	Errors  map[string][]string `json:"errors"`
@@ -157,23 +128,4 @@ type ErrorResponse struct {
 type SimpleErrorResponse struct {
 	Success bool     `json:"success"`
 	Errors  []string `json:"errors"`
-}
-
-type PaginatedResponse struct {
-	Success bool           `json:"success"`
-	Data    interface{}    `json:"data"`
-	Meta    PaginationMeta `json:"meta"`
-}
-
-type PaginationMeta struct {
-	Pagination Pagination `json:"pagination"`
-}
-
-type Pagination struct {
-	Page    int `json:"page"`
-	Next    int `json:"next"`
-	Prev    int `json:"prev"`
-	Pages   int `json:"pages"`
-	PerPage int `json:"per_page"`
-	Total   int `json:"total"`
 }

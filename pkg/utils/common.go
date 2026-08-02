@@ -46,7 +46,8 @@ func ExtractFilenameFromURL(fileURL string) (string, error) {
 
 	filename := filepath.Base(parsedURL.Path)
 
-	if filename == "" || filename == "/" || filename == "." {
+	// reject traversal/edge names
+	if filename == "" || filename == "/" || filename == "." || filename == ".." {
 		filename = "download"
 	}
 
