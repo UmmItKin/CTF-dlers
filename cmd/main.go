@@ -141,7 +141,15 @@ func main() {
 
 	fmt.Printf("CTFd Downloader  ·  %s  ·  %s\n\n", config.BaseURL, config.OutputDir)
 
-	rows := runWithDashboard(ctx, downloadService)
+	rows, err := runWithDashboard(ctx, downloadService)
+	if err != nil {
+		if errors.Is(err, context.Canceled) {
+			fmt.Println("Cancelled.")
+			os.Exit(130)
+		}
+		log.Fatalf("Download failed: %v", err)
+	}
+
 	stats := downloadService.GetStats()
 
 	renderResultsTable(rows)
@@ -238,8 +246,8 @@ func createTarball(srcDir, outFile string) (err error) {
 }
 
 // runWithDashboard drives the download while rendering a live progress bar and
-// returns the per-challenge results for the summary table.
-func runWithDashboard(ctx context.Context, ds *services.DownloadService) []models.DownloadResult {
+// returns the per-challenge results plus the download error (if any).
+func runWithDashboard(ctx context.Context, ds *services.DownloadService) ([]models.DownloadResult, error) {
 	pw := progress.NewWriter()
 	pw.SetAutoStop(false)
 	pw.SetTrackerLength(30)
@@ -271,20 +279,24 @@ func runWithDashboard(ctx context.Context, ds *services.DownloadService) []model
 		rows = append(rows, r)
 	})
 
-	if _, err := ds.DownloadAllChallenges(ctx); err != nil && !errors.Is(err, context.Canceled) {
-		pw.Stop()
-		log.Fatalf("Download failed: %v", err)
+	_, err := ds.DownloadAllChallenges(ctx)
+
+	if err != nil {
+		tracker.MarkAsErrored()
+	} else {
+		tracker.MarkAsDone()
 	}
 
-	tracker.MarkAsDone()
-	time.Sleep(120 * time.Millisecond) // let the final frame flush
+	if started {
+		time.Sleep(120 * time.Millisecond) // let the final frame flush
+	}
 	pw.Stop()
 	for pw.IsRenderInProgress() {
 		time.Sleep(20 * time.Millisecond)
 	}
 	fmt.Println()
 
-	return rows
+	return rows, err
 }
 
 func renderResultsTable(rows []models.DownloadResult) {

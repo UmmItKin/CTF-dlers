@@ -170,6 +170,13 @@ func (ds *DownloadService) DownloadAllChallenges(ctx context.Context) (*models.D
 	ds.finalize()
 
 	finalStats := ds.getStats()
+
+	// The drain loop can end normally when workers stop on cancellation, so
+	// report the cancellation explicitly rather than a bogus "success".
+	if err := ctx.Err(); err != nil {
+		return finalStats, err
+	}
+
 	if ds.progress == nil {
 		log.Printf("Download completed: %d successful, %d skipped, %d failed, %d files (%s) in %v",
 			finalStats.Downloaded, finalStats.Skipped, finalStats.Failed, finalStats.FilesDownloaded,
