@@ -1,14 +1,20 @@
 package main
 
 import (
+	"archive/tar"
+	"bufio"
+	"compress/gzip"
 	"context"
 	"errors"
 	"flag"
 	"fmt"
+	"io"
 	"log"
 	"os"
 	"os/signal"
+	"path/filepath"
 	"sort"
+	"strings"
 	"syscall"
 	"time"
 
@@ -152,9 +158,83 @@ func main() {
 		}
 	}
 
+	promptTarball(config.OutputDir)
+
 	if stats.Failed > 0 {
 		os.Exit(1)
 	}
+}
+
+// promptTarball offers to bundle the whole output dir into a .tar.gz to share
+// with teammates.
+func promptTarball(outputDir string) {
+	fmt.Print("\nTarball all challenges to send to your team? [y/N] ")
+	answer, _ := bufio.NewReader(os.Stdin).ReadString('\n')
+	switch strings.ToLower(strings.TrimSpace(answer)) {
+	case "y", "yes":
+	default:
+		return
+	}
+
+	name := fmt.Sprintf("%s-%s.tar.gz", filepath.Base(filepath.Clean(outputDir)), time.Now().Format("20060102-150405"))
+	if err := createTarball(outputDir, name); err != nil {
+		fmt.Printf("Failed to create tarball: %v\n", err)
+		return
+	}
+	fmt.Printf("Wrote %s\n", name)
+}
+
+func createTarball(srcDir, outFile string) (err error) {
+	f, err := os.Create(outFile)
+	if err != nil {
+		return err
+	}
+	defer func() {
+		if cerr := f.Close(); cerr != nil && err == nil {
+			err = cerr
+		}
+	}()
+
+	gz := gzip.NewWriter(f)
+	tw := tar.NewWriter(gz)
+
+	walkErr := filepath.Walk(srcDir, func(path string, info os.FileInfo, err error) error {
+		if err != nil {
+			return err
+		}
+		rel, err := filepath.Rel(srcDir, path)
+		if err != nil || rel == "." {
+			return err
+		}
+		hdr, err := tar.FileInfoHeader(info, "")
+		if err != nil {
+			return err
+		}
+		hdr.Name = filepath.ToSlash(rel)
+		if err := tw.WriteHeader(hdr); err != nil {
+			return err
+		}
+		if info.IsDir() {
+			return nil
+		}
+		src, err := os.Open(path)
+		if err != nil {
+			return err
+		}
+		defer src.Close()
+		_, err = io.Copy(tw, src)
+		return err
+	})
+	if walkErr != nil {
+		tw.Close()
+		gz.Close()
+		return walkErr
+	}
+	if err := tw.Close(); err != nil {
+		gz.Close()
+		return err
+	}
+	return gz.Close()
 }
 
 // runWithDashboard drives the download while rendering a live progress bar and
