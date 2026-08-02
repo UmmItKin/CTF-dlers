@@ -40,3 +40,5 @@ Flow: `cmd/main.go` (CLI/config/dashboard) → `pkg/client` (HTTP) → `pkg/serv
 ## Output UX
 
 The dashboard (banner, live progress bar, colored `Challenges`/`Summary` tables, tarball prompt) lives entirely in `cmd/main.go` using `go-pretty`. The interactive tarball prompt reads stdin in a goroutine and `select`s on `ctx.Done()` so Ctrl-C stays responsive there. Non-interactive/log fallback in the service only runs when no progress hook is registered. The results table's category column comes from `DownloadResult.Category` (set in `processChallenge` from the already-fetched challenge list, so there's no extra API call); add new per-challenge columns the same way rather than re-querying.
+
+`main` wires cancellation with `signal.NotifyContext`. On `errors.Is(err, context.Canceled)` it prints `Cancelled.` and exits `130` without rendering tables or the tarball prompt; a normal finish renders both and exits `1` only if any challenge failed. Because a cancelled download can leave the drain loop looking clean, the exit path relies on `DownloadAllChallenges` returning `ctx.Err()` (see Architecture) rather than inferring success.
