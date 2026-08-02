@@ -40,4 +40,4 @@ case ":$PATH:" in
 esac
 
 echo
-printf "\tRun ${bold}%s -help${reset} to get started.\n" "$BIN"
+echo "${bold}${cyan}==> Run '${BIN} -help' to get started.${reset}"
