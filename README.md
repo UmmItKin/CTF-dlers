@@ -2,12 +2,11 @@
 
 # CTF-dlers
 
-Concurrent CLI downloader for **CTFd** challenges — pulls every challenge over the CTFd API into a tidy `challenges/<category>/<name>/` tree with metadata, README, and files, behind a live progress dashboard.
+Concurrent CLI downloader for **CTFd** challenges. It pulls every challenge over the CTFd API into a tidy `challenges/<category>/<name>/` tree with metadata, a README, and files, behind a live progress dashboard.
 
-[![Go](https://img.shields.io/badge/Go-1.25+-00ADD8?logo=go&logoColor=white)](https://go.dev)
-[![Go Report Card](https://goreportcard.com/badge/github.com/UmmItKin/CTF-dlers)](https://goreportcard.com/report/github.com/UmmItKin/CTF-dlers)
-[![License: MIT](https://img.shields.io/badge/License-MIT-blue.svg)](LICENSE)
-![Platform](https://img.shields.io/badge/platform-linux%20|%20macos%20|%20windows-lightgrey)
+[![Go](https://img.shields.io/badge/Go-1.25+-00ADD8?logo=go&logoColor=white&style=for-the-badge)](https://go.dev)
+[![License](https://img.shields.io/badge/License-MIT-blue?style=for-the-badge)](LICENSE)
+![Platform](https://img.shields.io/badge/platform-linux%20|%20macos%20|%20windows-lightgrey?style=for-the-badge)
 
 </div>
 
@@ -40,9 +39,9 @@ everything into a `.tar.gz` to share with teammates.
 
 | Flag | Description | Default |
 |------|-------------|---------|
-| `-url`, `-token` | CTFd base URL and access token (required) | — |
+| `-url`, `-token` | CTFd base URL and access token (required) | n/a |
 | `-output` | Output directory | `./challenges` |
-| `-config` | YAML config file (see below) | — |
+| `-config` | YAML config file (see below) | n/a |
 | `-workers` | Concurrent challenge workers | `5` |
 | `-rate-limit` | Requests per second | `10` |
 | `-retry`, `-retry-delay` | Retry attempts / delay between them | `3`, `1s` |
@@ -72,11 +71,11 @@ CLI flags override the config file, which overrides defaults. Run with `-config 
 challenges/
 └── <category>/
     └── <challenge>/
-        ├── challenge.yml   # metadata (id, value, tags, files w/ sha1, hints, solves…)
+        ├── challenge.yml   # metadata (id, value, tags, files with sha1, hints, solves)
         ├── README.md       # human-readable description
-        └── <files…>        # challenge attachments
+        └── <files>         # challenge attachments
 ```
 
 ## License
 
-MIT — see [LICENSE](LICENSE).
+MIT. See [LICENSE](LICENSE).
