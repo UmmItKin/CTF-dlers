@@ -336,10 +336,15 @@ func styledTable(title string) table.Writer {
 }
 
 func renderResultsTable(rows []models.DownloadResult) {
-	sort.Slice(rows, func(i, j int) bool { return rows[i].Name < rows[j].Name })
+	sort.Slice(rows, func(i, j int) bool {
+		if rows[i].Category != rows[j].Category {
+			return rows[i].Category < rows[j].Category
+		}
+		return rows[i].Name < rows[j].Name
+	})
 
 	t := styledTable("Challenges")
-	t.AppendHeader(table.Row{"#", "Challenge", "Files", "Status"})
+	t.AppendHeader(table.Row{"#", "Category", "Challenge", "Files", "Status"})
 	for i, r := range rows {
 		var status string
 		switch {
@@ -350,7 +355,11 @@ func renderResultsTable(rows []models.DownloadResult) {
 		default:
 			status = text.Colors{text.FgHiGreen}.Sprint("OK")
 		}
-		t.AppendRow(table.Row{i + 1, r.Name, len(r.Files), status})
+		category := r.Category
+		if category == "" {
+			category = "-"
+		}
+		t.AppendRow(table.Row{i + 1, text.FgHiMagenta.Sprint(category), r.Name, len(r.Files), status})
 	}
 	t.Render()
 }

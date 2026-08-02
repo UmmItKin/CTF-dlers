@@ -84,6 +84,7 @@ type DownloadStats struct {
 type DownloadResult struct {
 	ChallengeID int      `json:"challenge_id"`
 	Name        string   `json:"name"`
+	Category    string   `json:"category"`
 	Success     bool     `json:"success"`
 	Skipped     bool     `json:"skipped"`
 	Error       error    `json:"-"` // no useful JSON form

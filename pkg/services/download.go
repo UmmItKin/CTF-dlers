@@ -210,6 +210,7 @@ func (ds *DownloadService) processChallenge(ctx context.Context, challenge model
 	result := models.DownloadResult{
 		ChallengeID: challenge.ID,
 		Name:        challenge.Name,
+		Category:    challenge.Category,
 		Success:     false,
 	}
 
