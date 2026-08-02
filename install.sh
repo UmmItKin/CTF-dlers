@@ -30,14 +30,14 @@ size=$(du -h "$INSTALL_DIR/$BIN" | cut -f1)
 
 echo
 echo "${bold}${green}==> Installed${reset}"
-printf "    %-8s %s\n" "path"    "$INSTALL_DIR/$BIN"
-printf "    %-8s %s\n" "version" "$version"
-printf "    %-8s %s\n" "size"    "$size"
+printf "\t%s\t%s\n" "path"    "$INSTALL_DIR/$BIN"
+printf "\t%s\t%s\n" "version" "$version"
+printf "\t%s\t%s\n" "size"    "$size"
 
 case ":$PATH:" in
     *":$INSTALL_DIR:"*) ;;
-    *) echo "    ${yellow}note${reset}     $INSTALL_DIR is not on your PATH" ;;
+    *) printf "\t${yellow}%s${reset}\t%s\n" "note" "$INSTALL_DIR is not on your PATH" ;;
 esac
 
 echo
-echo "    Run ${bold}${BIN} -help${reset} to get started."
+printf "\tRun ${bold}%s -help${reset} to get started.\n" "$BIN"
