@@ -21,6 +21,22 @@ type DownloadService struct {
 	limiter    *rate.Limiter
 	stats      *models.DownloadStats
 	statsMutex sync.RWMutex
+	progress   func(done, total int, result models.DownloadResult)
+}
+
+// SetProgressHook registers an optional callback fired once per finished
+// challenge. When set, per-result logging is suppressed so a caller can render
+// its own UI.
+func (ds *DownloadService) SetProgressHook(fn func(done, total int, result models.DownloadResult)) {
+	ds.progress = fn
+}
+
+// logf logs only when no progress hook owns the display, so log lines never
+// corrupt a caller's live UI.
+func (ds *DownloadService) logf(format string, args ...interface{}) {
+	if ds.progress == nil {
+		log.Printf(format, args...)
+	}
 }
 
 type DownloadConfig struct {
@@ -72,7 +88,9 @@ func NewDownloadService(ctfdClient *client.CTFdClient, filesystem *FileSystemSer
 func (ds *DownloadService) DownloadAllChallenges(ctx context.Context) (*models.DownloadStats, error) {
 	ds.resetStats()
 
-	log.Println("Fetching challenge list...")
+	if ds.progress == nil {
+		log.Println("Fetching challenge list...")
+	}
 
 	challenges, err := ds.client.GetChallenges()
 	if err != nil {
@@ -81,7 +99,11 @@ func (ds *DownloadService) DownloadAllChallenges(ctx context.Context) (*models.D
 	}
 
 	ds.setTotalChallenges(len(challenges))
-	log.Printf("Found %d challenges", len(challenges))
+	if ds.progress != nil {
+		ds.progress(0, len(challenges), models.DownloadResult{}) // announce total before work starts
+	} else {
+		log.Printf("Found %d challenges", len(challenges))
+	}
 
 	challengeJobs := make(chan models.Challenge, len(challenges))
 	results := make(chan models.DownloadResult, len(challenges))
@@ -111,24 +133,35 @@ func (ds *DownloadService) DownloadAllChallenges(ctx context.Context) (*models.D
 	var processedCount int
 	for result := range results {
 		processedCount++
+		quiet := ds.progress != nil
 		if result.Success {
 			if result.Skipped {
 				ds.incrementSkipped()
-				log.Printf("[%d/%d] Skipped: %s", processedCount, len(challenges), result.Name)
+				if !quiet {
+					log.Printf("[%d/%d] Skipped: %s", processedCount, len(challenges), result.Name)
+				}
 			} else {
 				ds.incrementDownloaded()
-				log.Printf("[%d/%d] Successfully downloaded: %s", processedCount, len(challenges), result.Name)
+				if !quiet {
+					log.Printf("[%d/%d] Successfully downloaded: %s", processedCount, len(challenges), result.Name)
+				}
 			}
 		} else {
 			ds.incrementFailed()
 			errorMsg := fmt.Sprintf("Failed to download %s: %v", result.Name, result.Error)
 			ds.addError(errorMsg)
-			log.Printf("[%d/%d] %s", processedCount, len(challenges), errorMsg)
+			if !quiet {
+				log.Printf("[%d/%d] %s", processedCount, len(challenges), errorMsg)
+			}
+		}
+
+		if ds.progress != nil {
+			ds.progress(processedCount, len(challenges), result)
 		}
 
 		select {
 		case <-ctx.Done():
-			log.Println("Download cancelled")
+			ds.logf("Download cancelled")
 			return ds.getStats(), ctx.Err()
 		default:
 		}
@@ -137,9 +170,11 @@ func (ds *DownloadService) DownloadAllChallenges(ctx context.Context) (*models.D
 	ds.finalize()
 
 	finalStats := ds.getStats()
-	log.Printf("Download completed: %d successful, %d skipped, %d failed, %d files (%s) in %v",
-		finalStats.Downloaded, finalStats.Skipped, finalStats.Failed, finalStats.FilesDownloaded,
-		formatBytes(finalStats.TotalSize), finalStats.Duration)
+	if ds.progress == nil {
+		log.Printf("Download completed: %d successful, %d skipped, %d failed, %d files (%s) in %v",
+			finalStats.Downloaded, finalStats.Skipped, finalStats.Failed, finalStats.FilesDownloaded,
+			formatBytes(finalStats.TotalSize), finalStats.Duration)
+	}
 
 	return finalStats, nil
 }
@@ -174,7 +209,7 @@ func (ds *DownloadService) processChallenge(ctx context.Context, challenge model
 	var lastErr error
 	for attempt := 0; attempt < ds.config.RetryCount; attempt++ {
 		if attempt > 0 {
-			log.Printf("Retrying challenge %s (attempt %d/%d)", challenge.Name, attempt+1, ds.config.RetryCount)
+			ds.logf("Retrying challenge %s (attempt %d/%d)", challenge.Name, attempt+1, ds.config.RetryCount)
 			select {
 			case <-time.After(ds.config.RetryDelay):
 			case <-ctx.Done():
@@ -209,9 +244,9 @@ func (ds *DownloadService) downloadChallenge(ctx context.Context, challenge *mod
 
 	if ds.config.SkipExisting {
 		if existing, exists, err := ds.filesystem.CheckExistingChallenge(challengeDetail); err != nil {
-			log.Printf("Warning: Could not check existing challenge %s: %v", challenge.Name, err)
+			ds.logf("Warning: Could not check existing challenge %s: %v", challenge.Name, err)
 		} else if exists {
-			log.Printf("Skipping existing challenge: %s (downloaded %v)", challenge.Name, existing.DownloadedAt.Format("2006-01-02 15:04:05"))
+			ds.logf("Skipping existing challenge: %s (downloaded %v)", challenge.Name, existing.DownloadedAt.Format("2006-01-02 15:04:05"))
 			result.OutputPath = fmt.Sprintf("%s/%s", sanitizeName(challengeDetail.Category), sanitizeName(challengeDetail.Name))
 			result.Skipped = true
 			return nil
@@ -255,7 +290,7 @@ func (ds *DownloadService) downloadChallenge(ctx context.Context, challenge *mod
 	if ds.config.IncludeSolves {
 		solvesData, err := ds.client.GetChallengeSolves(challenge.ID)
 		if err != nil {
-			log.Printf("Warning: Could not fetch solves for %s: %v", challenge.Name, err)
+			ds.logf("Warning: Could not fetch solves for %s: %v", challenge.Name, err)
 		} else {
 			for _, solve := range solvesData {
 				solveInfo := models.SolveInfo{

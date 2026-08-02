@@ -8,7 +8,7 @@ import (
 	"log"
 	"os"
 	"os/signal"
-	"strings"
+	"sort"
 	"syscall"
 	"time"
 
@@ -17,6 +17,8 @@ import (
 	"ctfd-downloader/pkg/services"
 	"ctfd-downloader/pkg/utils"
 
+	"github.com/jedib0t/go-pretty/v6/progress"
+	"github.com/jedib0t/go-pretty/v6/table"
 	"gopkg.in/yaml.v3"
 )
 
@@ -131,29 +133,120 @@ func main() {
 		cancel()
 	}()
 
-	log.Printf("Starting download from %s", config.BaseURL)
-	log.Printf("Output directory: %s", config.OutputDir)
-	log.Printf("Workers: %d, Rate limit: %d req/s", config.MaxWorkers, config.RateLimit)
+	fmt.Printf("CTFd Downloader  ·  %s  ·  %s\n\n", config.BaseURL, config.OutputDir)
 
-	stats, err := downloadService.DownloadAllChallenges(ctx)
-	if err != nil && !errors.Is(err, context.Canceled) {
-		log.Fatalf("Download failed: %v", err)
-	}
+	rows := runWithDashboard(ctx, downloadService)
+	stats := downloadService.GetStats()
 
-	printStats(stats)
+	renderResultsTable(rows)
+	renderStatsTable(stats)
 
 	if len(stats.Errors) > 0 {
-		log.Printf("Encountered %d errors during download", len(stats.Errors))
+		fmt.Printf("\n%d error(s) during download:\n", len(stats.Errors))
 		if *verbose {
 			for i, errMsg := range stats.Errors {
-				log.Printf("Error %d: %s", i+1, errMsg)
+				fmt.Printf("  %d. %s\n", i+1, errMsg)
 			}
+		} else {
+			fmt.Println("  (run with -verbose to list them)")
 		}
 	}
 
 	if stats.Failed > 0 {
 		os.Exit(1)
 	}
+}
+
+// runWithDashboard drives the download while rendering a live progress bar and
+// returns the per-challenge results for the summary table.
+func runWithDashboard(ctx context.Context, ds *services.DownloadService) []models.DownloadResult {
+	pw := progress.NewWriter()
+	pw.SetAutoStop(false)
+	pw.SetTrackerLength(30)
+	pw.SetMessageLength(20)
+	pw.SetNumTrackersExpected(1)
+	pw.SetUpdateFrequency(80 * time.Millisecond)
+	pw.SetStyle(progress.StyleBlocks)
+	pw.Style().Colors = progress.StyleColorsExample
+	pw.Style().Visibility.ETA = true
+	pw.Style().Visibility.Value = true
+
+	tracker := &progress.Tracker{Message: "Downloading", Units: progress.UnitsDefault}
+
+	// Start rendering only once the total is known (first hook, done==0), so the
+	// bar never shows "???" during the initial challenge-list fetch.
+	var rows []models.DownloadResult // appended from the drain goroutine only
+	started := false
+	ds.SetProgressHook(func(done, total int, r models.DownloadResult) {
+		if !started {
+			started = true
+			tracker.UpdateTotal(int64(total))
+			pw.AppendTracker(tracker)
+			go pw.Render()
+		}
+		if done == 0 {
+			return
+		}
+		tracker.Increment(1)
+		rows = append(rows, r)
+	})
+
+	if _, err := ds.DownloadAllChallenges(ctx); err != nil && !errors.Is(err, context.Canceled) {
+		pw.Stop()
+		log.Fatalf("Download failed: %v", err)
+	}
+
+	tracker.MarkAsDone()
+	time.Sleep(120 * time.Millisecond) // let the final frame flush
+	pw.Stop()
+	for pw.IsRenderInProgress() {
+		time.Sleep(20 * time.Millisecond)
+	}
+	fmt.Println()
+
+	return rows
+}
+
+func renderResultsTable(rows []models.DownloadResult) {
+	sort.Slice(rows, func(i, j int) bool { return rows[i].Name < rows[j].Name })
+
+	t := table.NewWriter()
+	t.SetOutputMirror(os.Stdout)
+	t.SetStyle(table.StyleRounded)
+	t.SetTitle("Challenges")
+	t.AppendHeader(table.Row{"#", "Challenge", "Files", "Status"})
+	for i, r := range rows {
+		status := "OK"
+		switch {
+		case !r.Success:
+			status = "FAILED"
+		case r.Skipped:
+			status = "SKIPPED"
+		}
+		t.AppendRow(table.Row{i + 1, r.Name, len(r.Files), status})
+	}
+	t.Render()
+}
+
+func renderStatsTable(s *models.DownloadStats) {
+	t := table.NewWriter()
+	t.SetOutputMirror(os.Stdout)
+	t.SetStyle(table.StyleRounded)
+	t.SetTitle("Summary")
+	t.AppendRows([]table.Row{
+		{"Total challenges", s.TotalChallenges},
+		{"Downloaded", s.Downloaded},
+		{"Skipped", s.Skipped},
+		{"Failed", s.Failed},
+		{"Files downloaded", s.FilesDownloaded},
+		{"Total size", utils.FormatBytes(s.TotalSize)},
+		{"Duration", s.Duration.Round(time.Millisecond)},
+	})
+	if s.Duration > 0 && s.FilesDownloaded > 0 {
+		avg := float64(s.TotalSize) / s.Duration.Seconds()
+		t.AppendRow(table.Row{"Average speed", utils.FormatBytes(int64(avg)) + "/s"})
+	}
+	t.Render()
 }
 
 func loadConfig() (*models.Config, error) {
@@ -331,28 +424,6 @@ func performDryRun(ctfdClient *client.CTFdClient, outputDir string) error {
 	}
 
 	return nil
-}
-
-func printStats(stats *models.DownloadStats) {
-	sep := strings.Repeat("=", 50)
-	fmt.Println("\n" + sep)
-	fmt.Println("Download Statistics")
-	fmt.Println(sep)
-	fmt.Printf("Total challenges: %d\n", stats.TotalChallenges)
-	fmt.Printf("Downloaded: %d\n", stats.Downloaded)
-	fmt.Printf("Failed: %d\n", stats.Failed)
-	fmt.Printf("Total files: %d\n", stats.TotalFiles)
-	fmt.Printf("Files downloaded: %d\n", stats.FilesDownloaded)
-	fmt.Printf("Files failed: %d\n", stats.FilesFailed)
-	fmt.Printf("Total size: %s\n", utils.FormatBytes(stats.TotalSize))
-	fmt.Printf("Duration: %v\n", stats.Duration)
-
-	if stats.Duration > 0 && stats.FilesDownloaded > 0 {
-		avgSpeed := float64(stats.TotalSize) / stats.Duration.Seconds()
-		fmt.Printf("Average speed: %s/s\n", utils.FormatBytes(int64(avgSpeed)))
-	}
-
-	fmt.Println(sep)
 }
 
 func init() {
