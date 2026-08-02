@@ -25,6 +25,7 @@ import (
 
 	"github.com/jedib0t/go-pretty/v6/progress"
 	"github.com/jedib0t/go-pretty/v6/table"
+	"github.com/jedib0t/go-pretty/v6/text"
 	"gopkg.in/yaml.v3"
 )
 
@@ -127,17 +128,8 @@ func main() {
 		log.Fatalf("Failed to create output directory: %v", err)
 	}
 
-	ctx, cancel := context.WithCancel(context.Background())
-	defer cancel()
-
-	sigChan := make(chan os.Signal, 1)
-	signal.Notify(sigChan, syscall.SIGINT, syscall.SIGTERM)
-
-	go func() {
-		<-sigChan
-		log.Println("Received interrupt signal, shutting down gracefully...")
-		cancel()
-	}()
+	ctx, stop := signal.NotifyContext(context.Background(), syscall.SIGINT, syscall.SIGTERM)
+	defer stop()
 
 	fmt.Printf("CTFd Downloader  ·  %s  ·  %s\n\n", config.BaseURL, config.OutputDir)
 
@@ -166,7 +158,7 @@ func main() {
 		}
 	}
 
-	promptTarball(config.OutputDir)
+	promptTarball(ctx, config.OutputDir)
 
 	if stats.Failed > 0 {
 		os.Exit(1)
@@ -174,10 +166,24 @@ func main() {
 }
 
 // promptTarball offers to bundle the whole output dir into a .tar.gz to share
-// with teammates.
-func promptTarball(outputDir string) {
+// with teammates. It stays interruptible: a SIGINT (ctx cancel) aborts the wait.
+func promptTarball(ctx context.Context, outputDir string) {
 	fmt.Print("\nTarball all challenges to send to your team? [y/N] ")
-	answer, _ := bufio.NewReader(os.Stdin).ReadString('\n')
+
+	answerCh := make(chan string, 1)
+	go func() {
+		a, _ := bufio.NewReader(os.Stdin).ReadString('\n')
+		answerCh <- a
+	}()
+
+	var answer string
+	select {
+	case answer = <-answerCh:
+	case <-ctx.Done():
+		fmt.Println()
+		return
+	}
+
 	switch strings.ToLower(strings.TrimSpace(answer)) {
 	case "y", "yes":
 	default:
@@ -299,21 +305,36 @@ func runWithDashboard(ctx context.Context, ds *services.DownloadService) ([]mode
 	return rows, err
 }
 
-func renderResultsTable(rows []models.DownloadResult) {
-	sort.Slice(rows, func(i, j int) bool { return rows[i].Name < rows[j].Name })
-
+// styledTable returns a rounded table with bold cyan title, bold header and
+// dimmed borders — the shared look for both summary tables.
+func styledTable(title string) table.Writer {
 	t := table.NewWriter()
 	t.SetOutputMirror(os.Stdout)
 	t.SetStyle(table.StyleRounded)
-	t.SetTitle("Challenges")
+	t.SetTitle(title)
+	st := t.Style()
+	st.Title.Colors = text.Colors{text.Bold, text.FgHiCyan}
+	st.Title.Align = text.AlignCenter
+	st.Color.Header = text.Colors{text.Bold, text.FgHiWhite}
+	st.Color.Border = text.Colors{text.FgHiBlack}
+	st.Color.Separator = text.Colors{text.FgHiBlack}
+	return t
+}
+
+func renderResultsTable(rows []models.DownloadResult) {
+	sort.Slice(rows, func(i, j int) bool { return rows[i].Name < rows[j].Name })
+
+	t := styledTable("Challenges")
 	t.AppendHeader(table.Row{"#", "Challenge", "Files", "Status"})
 	for i, r := range rows {
-		status := "OK"
+		var status string
 		switch {
 		case !r.Success:
-			status = "FAILED"
+			status = text.Colors{text.FgHiRed, text.Bold}.Sprint("FAILED")
 		case r.Skipped:
-			status = "SKIPPED"
+			status = text.Colors{text.FgHiYellow}.Sprint("SKIPPED")
+		default:
+			status = text.Colors{text.FgHiGreen}.Sprint("OK")
 		}
 		t.AppendRow(table.Row{i + 1, r.Name, len(r.Files), status})
 	}
@@ -321,23 +342,29 @@ func renderResultsTable(rows []models.DownloadResult) {
 }
 
 func renderStatsTable(s *models.DownloadStats) {
-	t := table.NewWriter()
-	t.SetOutputMirror(os.Stdout)
-	t.SetStyle(table.StyleRounded)
-	t.SetTitle("Summary")
+	failColor := text.Colors{text.FgHiGreen}
+	if s.Failed > 0 {
+		failColor = text.Colors{text.FgHiRed, text.Bold}
+	}
+
+	t := styledTable("Summary")
 	t.AppendRows([]table.Row{
-		{"Total challenges", s.TotalChallenges},
-		{"Downloaded", s.Downloaded},
-		{"Skipped", s.Skipped},
-		{"Failed", s.Failed},
+		{"Total challenges", text.Colors{text.Bold}.Sprint(s.TotalChallenges)},
+		{"Downloaded", text.Colors{text.FgHiGreen}.Sprint(s.Downloaded)},
+		{"Skipped", text.Colors{text.FgHiYellow}.Sprint(s.Skipped)},
+		{"Failed", failColor.Sprint(s.Failed)},
 		{"Files downloaded", s.FilesDownloaded},
-		{"Total size", utils.FormatBytes(s.TotalSize)},
+		{"Total size", text.Colors{text.FgHiCyan}.Sprint(utils.FormatBytes(s.TotalSize))},
 		{"Duration", s.Duration.Round(time.Millisecond)},
 	})
 	if s.Duration > 0 && s.FilesDownloaded > 0 {
 		avg := float64(s.TotalSize) / s.Duration.Seconds()
-		t.AppendRow(table.Row{"Average speed", utils.FormatBytes(int64(avg)) + "/s"})
+		t.AppendRow(table.Row{"Average speed", text.Colors{text.FgHiCyan}.Sprint(utils.FormatBytes(int64(avg)) + "/s")})
 	}
+	t.SetColumnConfigs([]table.ColumnConfig{
+		{Number: 1, Colors: text.Colors{text.Bold}},
+		{Number: 2, Align: text.AlignRight},
+	})
 	t.Render()
 }
 
