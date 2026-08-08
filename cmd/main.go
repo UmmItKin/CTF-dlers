@@ -229,17 +229,19 @@ func promptTarball(ctx context.Context, outputDir string) {
 		return
 	}
 
-	// Write the tarball next to the challenges (under -output), not the CWD.
-	name := fmt.Sprintf("%s-%s.tar.gz", filepath.Base(outputDir), time.Now().Format("20060102-150405"))
-	outPath := filepath.Join(filepath.Dir(outputDir), name)
-	if err := createTarball(outputDir, outPath); err != nil {
+	// Write the tarball inside the ctf-name folder, with that folder as the
+	// archive's top-level directory.
+	root := filepath.Base(outputDir)
+	name := fmt.Sprintf("%s-%s.tar.gz", root, time.Now().Format("20060102-150405"))
+	outPath := filepath.Join(outputDir, name)
+	if err := createTarball(outputDir, outPath, root); err != nil {
 		fmt.Printf("Failed to create tarball: %v\n", err)
 		return
 	}
 	fmt.Printf("Wrote %s\n", outPath)
 }
 
-func createTarball(srcDir, outFile string) (err error) {
+func createTarball(srcDir, outFile, root string) (err error) {
 	f, err := os.Create(outFile)
 	if err != nil {
 		return err
@@ -261,11 +263,15 @@ func createTarball(srcDir, outFile string) (err error) {
 		if err != nil || rel == "." {
 			return err
 		}
+		// skip tarballs at the output root (this one and any from prior runs)
+		if !info.IsDir() && filepath.Dir(rel) == "." && strings.HasSuffix(rel, ".tar.gz") {
+			return nil
+		}
 		hdr, err := tar.FileInfoHeader(info, "")
 		if err != nil {
 			return err
 		}
-		hdr.Name = filepath.ToSlash(rel)
+		hdr.Name = filepath.ToSlash(filepath.Join(root, rel))
 		if err := tw.WriteHeader(hdr); err != nil {
 			return err
 		}
