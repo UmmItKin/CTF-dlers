@@ -54,24 +54,67 @@ func ExtractFilenameFromURL(fileURL string) (string, error) {
 	return filename, nil
 }
 
-var mdLinkRe = regexp.MustCompile(`\[[^\]]*\]\((https?://[^)\s]+)\)`)
+var (
+	mdLinkRe  = regexp.MustCompile(`\[[^\]]*\]\((https?://[^)\s]+)\)`)
+	bareURLRe = regexp.MustCompile(`https?://[^\s)\]<>"']+`)
+	fileExtRe = regexp.MustCompile(`\.[A-Za-z0-9]{1,8}$`)
+)
 
-// ExtractAttachmentURLs pulls direct file links out of a markdown description
-// (some CTFs list attachments there instead of in CTFd's files field). Viewer
-// links that aren't direct downloads (Google Drive, localhost) are skipped.
+// viewerHosts serve share/preview pages, not direct file bytes, so we can't
+// download from them without a browser/API. Skip them.
+var viewerHosts = []string{
+	"drive.google.com", "docs.google.com", "drive.proton.me", "proton.me",
+	"dropbox.com", "mega.nz", "mediafire.com", "1drv.ms", "onedrive.live.com",
+	"wetransfer.com", "localhost",
+}
+
+// ExtractAttachmentURLs pulls downloadable file links out of a challenge
+// description. Attachments often live there (as markdown links or bare URLs)
+// pointing at object storage like S3 or DigitalOcean Spaces, which are plain
+// public GETs needing no API. Share viewers (Google/Proton Drive, etc.) are
+// skipped since they aren't direct downloads.
 func ExtractAttachmentURLs(description string) []string {
 	var out []string
 	seen := map[string]bool{}
-	for _, m := range mdLinkRe.FindAllStringSubmatch(description, -1) {
-		u := m[1]
-		low := strings.ToLower(u)
-		if seen[u] || strings.Contains(low, "drive.google.com") || strings.Contains(low, "localhost") {
-			continue
+	add := func(u string, requireExt bool) {
+		u = strings.TrimRight(u, ".,;:!?)]}'\"")
+		if seen[u] || isViewerHost(u) {
+			return
+		}
+		if requireExt && !hasFileExtension(u) {
+			return
 		}
 		seen[u] = true
 		out = append(out, u)
 	}
+	// Author-labeled links are trusted even without a file extension (e.g. a
+	// binary named "chall"); bare URLs must look like a file to avoid grabbing
+	// website/discord/rules links.
+	for _, m := range mdLinkRe.FindAllStringSubmatch(description, -1) {
+		add(m[1], false)
+	}
+	for _, u := range bareURLRe.FindAllString(description, -1) {
+		add(u, true)
+	}
 	return out
+}
+
+func isViewerHost(rawURL string) bool {
+	low := strings.ToLower(rawURL)
+	for _, h := range viewerHosts {
+		if strings.Contains(low, h) {
+			return true
+		}
+	}
+	return false
+}
+
+func hasFileExtension(rawURL string) bool {
+	u, err := url.Parse(rawURL)
+	if err != nil {
+		return false
+	}
+	return fileExtRe.MatchString(filepath.Base(u.Path))
 }
 
 func FormatBytes(bytes int64) string {

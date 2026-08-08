@@ -44,9 +44,11 @@ You authenticate one of two ways:
 `-url` can also come from `CTFD_URL` or a config file. After a run you're prompted to
 bundle everything into a `.tar.gz` to share with teammates.
 
-Attachments come from CTFd's file list and from direct links in each challenge's
-description (some CTFs list files there). Description links over 250 MB are skipped so a
-stray VM image or installer link can't run away.
+Attachments come from CTFd's file list **and** from links in each challenge's description
+(some CTFs host files on external storage like S3 or DigitalOcean Spaces, which are plain
+public downloads). Any host works; only share-preview pages that can't be fetched directly
+(Google Drive, Proton Drive, Dropbox, MEGA, …) are skipped. Description links over 250 MB
+are skipped too, so a stray VM image or installer link can't run away.
 
 ### Options
 
