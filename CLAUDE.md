@@ -39,7 +39,7 @@ Attachments come from two sources: CTFd's `Files` **and** links parsed out of th
 
 ## Config precedence and gotchas
 
-`cmd/main.go loadConfig`: defaults → config file (`mergeConfigs`) → CLI flags → env (`CTFD_URL`/`CTFD_TOKEN`/`CTFD_COOKIE`). Flags override the file **only when actually set**, detected via `flag.Visit` (not by comparing against default values, which would drop a flag set to its default). `retryDelay` must be parsed from the merged `config.RetryDelay` *after* `loadConfig`, or a config-file value is ignored. `-ctf-name` is required for a download (not for `-test`/`-version`); `main` joins it onto `OutputDir` as `output/<sanitized-ctf-name>/` after the `-test` early-return.
+`cmd/main.go loadConfig`: defaults → config file (`mergeConfigs`) → CLI flags → env (`CTFD_URL`/`CTFD_TOKEN`/`CTFD_COOKIE`). Flags override the file **only when actually set**, detected via `flag.Visit` (not by comparing against default values, which would drop a flag set to its default). `retryDelay` must be parsed from the merged `config.RetryDelay` *after* `loadConfig`, or a config-file value is ignored. `-ctf-name` is required for a download (not for `-test`/`-version`); `main` joins it onto `OutputDir` as `<output>/<ctf-name>/` after the `-test` early-return. The name is kept as typed (spaces preserved), guarded only by `filepath.Base` so it can't escape the base dir — unlike API-derived category/challenge names, which go through `utils.SanitizeName`. The tarball is written under `<output>` (next to the challenge folder), named after the ctf-name.
 
 ## Output UX
 

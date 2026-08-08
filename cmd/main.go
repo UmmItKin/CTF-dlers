@@ -133,10 +133,12 @@ func main() {
 	}
 
 	// A competition name is required so challenges land in output/<ctf-name>/.
-	if config.CTFName == "" {
-		log.Fatalf("Configuration error: -ctf-name is required (e.g. -ctf-name scriptctf-2026)")
+	// Keep it as the user typed (spaces and all); only stop it escaping the base dir.
+	ctfDir := filepath.Base(strings.TrimSpace(config.CTFName))
+	if ctfDir == "" || ctfDir == "." || ctfDir == ".." {
+		log.Fatalf("Configuration error: -ctf-name is required (e.g. -ctf-name \"scriptCTF 2026\")")
 	}
-	config.OutputDir = filepath.Join(config.OutputDir, utils.SanitizeName(config.CTFName))
+	config.OutputDir = filepath.Join(config.OutputDir, ctfDir)
 
 	filesystem := services.NewFileSystemService(config.OutputDir)
 
@@ -227,12 +229,14 @@ func promptTarball(ctx context.Context, outputDir string) {
 		return
 	}
 
-	name := fmt.Sprintf("%s-%s.tar.gz", filepath.Base(filepath.Clean(outputDir)), time.Now().Format("20060102-150405"))
-	if err := createTarball(outputDir, name); err != nil {
+	// Write the tarball next to the challenges (under -output), not the CWD.
+	name := fmt.Sprintf("%s-%s.tar.gz", filepath.Base(outputDir), time.Now().Format("20060102-150405"))
+	outPath := filepath.Join(filepath.Dir(outputDir), name)
+	if err := createTarball(outputDir, outPath); err != nil {
 		fmt.Printf("Failed to create tarball: %v\n", err)
 		return
 	}
-	fmt.Printf("Wrote %s\n", name)
+	fmt.Printf("Wrote %s\n", outPath)
 }
 
 func createTarball(srcDir, outFile string) (err error) {
