@@ -18,6 +18,7 @@ import (
 	"syscall"
 	"time"
 
+	"ctfd-downloader/pkg/browser"
 	"ctfd-downloader/pkg/client"
 	"ctfd-downloader/pkg/models"
 	"ctfd-downloader/pkg/services"
@@ -51,6 +52,7 @@ var (
 	baseURL       = flag.String("url", "", "CTFd base URL (required)")
 	token         = flag.String("token", "", "CTFd access token (or use -cookie)")
 	cookie        = flag.String("cookie", "", "CTFd session cookie, e.g. from your browser (alternative to -token)")
+	fromBrowser   = flag.Bool("from-browser", false, "Auto-read the session cookie from your logged-in browser for the -url host")
 	ctfName       = flag.String("ctf-name", "", "Competition name; challenges go under <output>/<ctf-name>/ (required to download)")
 	outputDir     = flag.String("output", "output", "Base output directory")
 	configFile    = flag.String("config", "", "Configuration file path")
@@ -79,6 +81,15 @@ func main() {
 	config, err := loadConfig()
 	if err != nil {
 		log.Fatalf("Failed to load configuration: %v", err)
+	}
+
+	if *fromBrowser && config.Cookie == "" && config.BaseURL != "" {
+		c, err := browser.SessionCookie(config.BaseURL)
+		if err != nil {
+			log.Fatalf("Failed to read browser cookie: %v", err)
+		}
+		config.Cookie = c
+		log.Printf("Loaded session cookie from browser for %s", config.BaseURL)
 	}
 
 	if err := validateConfig(config); err != nil {

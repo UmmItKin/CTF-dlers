@@ -20,7 +20,9 @@ Verify changes with `go build ./... && go vet ./... && go test -race ./...`.
 
 ## Architecture
 
-Flow: `cmd/main.go` (CLI/config/dashboard) → `pkg/client` (HTTP) → `pkg/services` (concurrency + filesystem) → `pkg/models` (wire + domain types).
+Flow: `cmd/main.go` (CLI/config/dashboard) → `pkg/client` (HTTP) → `pkg/services` (concurrency + filesystem) → `pkg/models` (wire + domain types). `pkg/browser` reads a `session` cookie from a Firefox-family profile (`-from-browser`).
+
+**`pkg/browser/cookies.go`**: `SessionCookie(url)` finds `cookies.sqlite` under `~/.floorp`, `~/.mozilla/firefox`, `~/.librewolf`, copies it (plus any `-wal`/`-shm`) to a temp dir to dodge the browser lock, and queries `moz_cookies` for the host's `session` cookie via the pure-Go `modernc.org/sqlite` driver. `main` calls it before `validateConfig` when `-from-browser` is set and no cookie was given.
 
 **`pkg/client/ctfd.go`**: resty-based CTFd client. Auth is attached **per request** via `auth()`, not globally: a token (`Bearer`) or a session cookie (`Cookie: session=…`, from a logged-in browser). `apiReq()` always authenticates; `fileReq(url)` does so only for same-host or relative URLs, so a challenge's file list can't leak the token/cookie to a foreign host (external S3/Spaces links download with no auth). `checkResponseError` parses the server's error body first, then falls back to `checkHTTPStatusCode`. `FileSize` HEADs a URL for the description-attachment size cap.
 
