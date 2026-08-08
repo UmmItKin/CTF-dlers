@@ -28,8 +28,8 @@ Needs Go 1.25+. Build only: `just build` → `./CTF-dlers`.
 # Download every challenge (API token) into output/scriptctf-2026/
 ./CTF-dlers -url https://ctf.example.com -token ctfd_abc123 -ctf-name scriptctf-2026
 
-# No token? Grab the session cookie straight from your logged-in browser
-./CTF-dlers -url https://ctf.example.com -from-browser -ctf-name scriptctf-2026
+# No token? Point -from-browser at the CTF and it grabs your logged-in session cookie
+./CTF-dlers -from-browser https://ctf.example.com -ctf-name scriptctf-2026
 
 # ...or paste the cookie yourself
 ./CTF-dlers -url https://ctf.example.com -cookie "<session-cookie>" -ctf-name scriptctf-2026
@@ -45,10 +45,11 @@ to download (but not for `-test`).
 You authenticate one of two ways:
 
 - **Token**: get one from **CTFd → Settings → Access Tokens**. Also read from `CTFD_TOKEN`.
-- **Session cookie**: for instances without tokens. Easiest is `-from-browser`, which reads
-  the `session` cookie for the `-url` host straight from your logged-in Firefox/Floorp/LibreWolf
-  profile (Chrome isn't supported — its cookies are OS-encrypted). Or pass it yourself with
-  `-cookie` (or `CTFD_COOKIE`), bare value or `session=...` pair.
+- **Session cookie**: for instances without tokens. Easiest is `-from-browser https://ctf...`,
+  which takes the CTF URL and reads its `session` cookie straight from your logged-in
+  Firefox/Floorp/LibreWolf profile (no `-url`/`-cookie` needed; Chrome isn't supported, its
+  cookies are OS-encrypted). Or pass it yourself with `-cookie` (or `CTFD_COOKIE`), bare value
+  or `session=...` pair.
 
 `-url` can also come from `CTFD_URL` or a config file. After a run you're prompted to
 bundle everything into a `.tar.gz` to share with teammates.
@@ -65,7 +66,7 @@ are skipped too, so a stray VM image or installer link can't run away.
 |------|-------------|---------|
 | `-url` | CTFd base URL (required) | n/a |
 | `-token`, `-cookie` | Access token, or browser session cookie (one required) | n/a |
-| `-from-browser` | Read the session cookie from your logged-in browser for the `-url` host | `false` |
+| `-from-browser` | CTF URL to target using your browser's session cookie (replaces `-url`) | n/a |
 | `-ctf-name` | Competition name; output goes under `output/<ctf-name>/` (required to download) | n/a |
 | `-output` | Base output directory | `output` |
 | `-config` | YAML config file (see below) | n/a |
