@@ -47,7 +47,8 @@ You authenticate one of two ways:
 - **Token**: get one from **CTFd → Settings → Access Tokens**. Also read from `CTFD_TOKEN`.
 - **Session cookie**: for instances without tokens. Easiest is `-from-browser`, which reads
   the `session` cookie for the `-url` host straight from your logged-in Firefox/Floorp/LibreWolf
-  profile. Or pass it yourself with `-cookie` (or `CTFD_COOKIE`), bare value or `session=...` pair.
+  profile (Chrome isn't supported — its cookies are OS-encrypted). Or pass it yourself with
+  `-cookie` (or `CTFD_COOKIE`), bare value or `session=...` pair.
 
 `-url` can also come from `CTFD_URL` or a config file. After a run you're prompted to
 bundle everything into a `.tar.gz` to share with teammates.
