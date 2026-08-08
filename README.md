@@ -23,23 +23,33 @@ Needs Go 1.25+. Build only: `just build` → `./CTF-dlers`.
 ## Usage
 
 ```bash
-# Download every challenge
+# Download every challenge (API token)
 ./CTF-dlers -url https://ctf.example.com -token ctfd_abc123
+
+# No token? Use your browser session cookie instead
+./CTF-dlers -url https://ctf.example.com -cookie "<session-cookie>"
 
 # Check auth, or preview without downloading
 ./CTF-dlers -url https://ctf.example.com -token ctfd_abc123 -test
 ./CTF-dlers -url https://ctf.example.com -token ctfd_abc123 -dry-run
 ```
 
-Get a token from **CTFd → Settings → Access Tokens**. `-url`/`-token` can also come from
-`CTFD_URL` / `CTFD_TOKEN`, or from a config file. After a run you're prompted to bundle
-everything into a `.tar.gz` to share with teammates.
+You authenticate one of two ways:
+
+- **Token**: get one from **CTFd → Settings → Access Tokens**. Also read from `CTFD_TOKEN`.
+- **Session cookie**: for instances without tokens, copy the `session` cookie from your
+  logged-in browser (DevTools → Application → Cookies) and pass it with `-cookie` (or
+  `CTFD_COOKIE`). Takes the bare value or a full `session=...` pair.
+
+`-url` can also come from `CTFD_URL` or a config file. After a run you're prompted to
+bundle everything into a `.tar.gz` to share with teammates.
 
 ### Options
 
 | Flag | Description | Default |
 |------|-------------|---------|
-| `-url`, `-token` | CTFd base URL and access token (required) | n/a |
+| `-url` | CTFd base URL (required) | n/a |
+| `-token`, `-cookie` | Access token, or browser session cookie (one required) | n/a |
 | `-output` | Output directory | `./challenges` |
 | `-config` | YAML config file (see below) | n/a |
 | `-workers` | Concurrent challenge workers | `5` |
@@ -53,7 +63,8 @@ everything into a `.tar.gz` to share with teammates.
 
 ```yaml
 base_url: "https://ctf.example.com"
-token: "ctfd_abc123"
+token: "ctfd_abc123"      # or use cookie instead
+# cookie: "<session>"
 output_dir: "./challenges"
 max_workers: 5
 rate_limit: 10
