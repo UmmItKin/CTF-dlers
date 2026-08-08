@@ -57,16 +57,16 @@ bundle everything into a `.tar.gz` to share with teammates.
 Attachments come from CTFd's file list **and** from links in each challenge's description
 (some CTFs host files on external storage like S3 or DigitalOcean Spaces, which are plain
 public downloads). Any host works; only share-preview pages that can't be fetched directly
-(Google Drive, Proton Drive, Dropbox, MEGA, …) are skipped. Description links over 250 MB
+(Google Drive, Proton Drive, Dropbox, MEGA, etc.) are skipped. Description links over 250 MB
 are skipped too, so a stray VM image or installer link can't run away.
 
 ### Options
 
 | Flag | Description | Default |
 |------|-------------|---------|
-| `-url` | CTFd base URL (required) | n/a |
-| `-token`, `-cookie` | Access token, or browser session cookie (one required) | n/a |
-| `-from-browser` | CTF URL to target using your browser's session cookie (replaces `-url`) | n/a |
+| `-url` | CTFd base URL (or use `-from-browser`) | n/a |
+| `-token`, `-cookie` | Access token or session cookie (one auth method required) | n/a |
+| `-from-browser` | CTF URL to target with your browser's session cookie (sets URL + auth in one) | n/a |
 | `-ctf-name` | Competition name; output goes under `output/<ctf-name>/` (required to download) | n/a |
 | `-output` | Base output directory | `output` |
 | `-config` | YAML config file (see below) | n/a |
