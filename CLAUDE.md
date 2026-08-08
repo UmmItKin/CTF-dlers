@@ -4,7 +4,7 @@ This file provides guidance to Claude Code (claude.ai/code) when working with co
 
 ## What this is
 
-A Go CLI (`CTF-dlers`, module path `ctfd-downloader`) that bulk-downloads challenges from a CTFd instance over its `/api/v1` REST API, writing an organized `challenges/[category]/[name]/` tree with `challenge.yml` + `README.md` + files per challenge. Requires Go 1.25+.
+A Go CLI (`CTF-dlers`, module path `ctfd-downloader`) that bulk-downloads challenges from a CTFd instance over its `/api/v1` REST API, writing an organized `output/<ctf-name>/[category]/[name]/` tree with `challenge.yml` + `README.md` + `view.html` + files per challenge. `-ctf-name` is required to download; auth is a token or a browser session cookie. Requires Go 1.25+. (rCTF and other platforms are planned.)
 
 ## Commands
 

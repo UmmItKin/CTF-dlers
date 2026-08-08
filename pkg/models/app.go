@@ -6,6 +6,7 @@ type Config struct {
 	BaseURL       string `yaml:"base_url" json:"base_url"`
 	Token         string `yaml:"token" json:"token"`
 	Cookie        string `yaml:"cookie" json:"cookie"`
+	CTFName       string `yaml:"ctf_name" json:"ctf_name"`
 	OutputDir     string `yaml:"output_dir" json:"output_dir"`
 	MaxWorkers    int    `yaml:"max_workers" json:"max_workers"`
 	RateLimit     int    `yaml:"rate_limit" json:"rate_limit"`
@@ -17,7 +18,7 @@ type Config struct {
 
 func DefaultConfig() *Config {
 	return &Config{
-		OutputDir:     "./challenges",
+		OutputDir:     "output",
 		MaxWorkers:    5,
 		RateLimit:     10,
 		RetryCount:    3,

@@ -19,23 +19,23 @@ test url token:
 test-bin url token: build
     ./CTF-dlers --url {{url}} --token {{token}} --test
 
-dry-run url token:
-    go run ./cmd --url {{url}} --token {{token}} --dry-run
+dry-run url token name:
+    go run ./cmd --url {{url}} --token {{token}} --ctf-name {{name}} --dry-run
 
-dry-run-bin url token: build
-    ./CTF-dlers --url {{url}} --token {{token}} --dry-run
+dry-run-bin url token name: build
+    ./CTF-dlers --url {{url}} --token {{token}} --ctf-name {{name}} --dry-run
 
-download url token:
-    go run ./cmd --url {{url}} --token {{token}}
+download url token name:
+    go run ./cmd --url {{url}} --token {{token}} --ctf-name {{name}}
 
-download-bin url token: build
-    ./CTF-dlers --url {{url}} --token {{token}}
+download-bin url token name: build
+    ./CTF-dlers --url {{url}} --token {{token}} --ctf-name {{name}}
 
-download-custom url token workers="10" rate="15":
-    go run ./cmd --url {{url}} --token {{token}} --workers {{workers}} --rate-limit {{rate}}
+download-custom url token name workers="10" rate="15":
+    go run ./cmd --url {{url}} --token {{token}} --ctf-name {{name}} --workers {{workers}} --rate-limit {{rate}}
 
-download-full url token:
-    go run ./cmd --url {{url}} --token {{token}} --hints --solves
+download-full url token name:
+    go run ./cmd --url {{url}} --token {{token}} --ctf-name {{name}} --hints --solves
 
 run-config config="config.yml":
     go run ./cmd --config {{config}}

@@ -2,7 +2,9 @@
 
 # CTF-dlers
 
-Concurrent CLI downloader for **CTFd** challenges. It pulls every challenge over the CTFd API into a tidy `challenges/<category>/<name>/` tree with metadata, a README, and files, behind a live progress dashboard.
+Concurrent CLI downloader for CTF challenges. It pulls every challenge into a tidy `output/<ctf-name>/<category>/<name>/` tree with metadata, a README, and files, behind a live progress dashboard.
+
+Supports **CTFd** today, with more platforms (**rCTF** and others) coming soon.
 
 [![Go](https://img.shields.io/badge/Go-1.25+-00ADD8?logo=go&logoColor=white&style=for-the-badge)](https://go.dev)
 [![License](https://img.shields.io/badge/License-MIT-blue?style=for-the-badge)](LICENSE)
@@ -23,16 +25,19 @@ Needs Go 1.25+. Build only: `just build` → `./CTF-dlers`.
 ## Usage
 
 ```bash
-# Download every challenge (API token)
-./CTF-dlers -url https://ctf.example.com -token ctfd_abc123
+# Download every challenge (API token) into output/scriptctf-2026/
+./CTF-dlers -url https://ctf.example.com -token ctfd_abc123 -ctf-name scriptctf-2026
 
 # No token? Use your browser session cookie instead
-./CTF-dlers -url https://ctf.example.com -cookie "<session-cookie>"
+./CTF-dlers -url https://ctf.example.com -cookie "<session-cookie>" -ctf-name scriptctf-2026
 
 # Check auth, or preview without downloading
 ./CTF-dlers -url https://ctf.example.com -token ctfd_abc123 -test
-./CTF-dlers -url https://ctf.example.com -token ctfd_abc123 -dry-run
+./CTF-dlers -url https://ctf.example.com -token ctfd_abc123 -ctf-name scriptctf-2026 -dry-run
 ```
+
+`-ctf-name` is the competition name; challenges land under `output/<ctf-name>/`. It's required
+to download (but not for `-test`).
 
 You authenticate one of two ways:
 
@@ -56,7 +61,8 @@ are skipped too, so a stray VM image or installer link can't run away.
 |------|-------------|---------|
 | `-url` | CTFd base URL (required) | n/a |
 | `-token`, `-cookie` | Access token, or browser session cookie (one required) | n/a |
-| `-output` | Output directory | `./challenges` |
+| `-ctf-name` | Competition name; output goes under `output/<ctf-name>/` (required to download) | n/a |
+| `-output` | Base output directory | `output` |
 | `-config` | YAML config file (see below) | n/a |
 | `-workers` | Concurrent challenge workers | `5` |
 | `-rate-limit` | Requests per second | `10` |
@@ -71,7 +77,8 @@ are skipped too, so a stray VM image or installer link can't run away.
 base_url: "https://ctf.example.com"
 token: "ctfd_abc123"      # or use cookie instead
 # cookie: "<session>"
-output_dir: "./challenges"
+ctf_name: "scriptctf-2026"
+output_dir: "output"
 max_workers: 5
 rate_limit: 10
 retry_count: 3

@@ -60,19 +60,15 @@ var (
 	fileExtRe = regexp.MustCompile(`\.[A-Za-z0-9]{1,8}$`)
 )
 
-// viewerHosts serve share/preview pages, not direct file bytes, so we can't
-// download from them without a browser/API. Skip them.
+// viewerHosts serve share/preview pages, not direct file bytes; skip them.
 var viewerHosts = []string{
 	"drive.google.com", "docs.google.com", "drive.proton.me", "proton.me",
 	"dropbox.com", "mega.nz", "mediafire.com", "1drv.ms", "onedrive.live.com",
 	"wetransfer.com", "localhost",
 }
 
-// ExtractAttachmentURLs pulls downloadable file links out of a challenge
-// description. Attachments often live there (as markdown links or bare URLs)
-// pointing at object storage like S3 or DigitalOcean Spaces, which are plain
-// public GETs needing no API. Share viewers (Google/Proton Drive, etc.) are
-// skipped since they aren't direct downloads.
+// ExtractAttachmentURLs pulls downloadable file links (markdown or bare URLs) from a
+// challenge description, skipping share viewers that aren't direct downloads.
 func ExtractAttachmentURLs(description string) []string {
 	var out []string
 	seen := map[string]bool{}
@@ -87,9 +83,7 @@ func ExtractAttachmentURLs(description string) []string {
 		seen[u] = true
 		out = append(out, u)
 	}
-	// Author-labeled links are trusted even without a file extension (e.g. a
-	// binary named "chall"); bare URLs must look like a file to avoid grabbing
-	// website/discord/rules links.
+	// markdown links are trusted as-is; bare URLs must look like a file (avoid site/discord links)
 	for _, m := range mdLinkRe.FindAllStringSubmatch(description, -1) {
 		add(m[1], false)
 	}

@@ -92,8 +92,7 @@ func (fs *FileSystemService) SaveChallengeREADME(challenge *models.ChallengeDeta
 	return nil
 }
 
-// hasLaunchableInstance reports whether the challenge spins up an on-demand
-// container (ctfd-whale and similar), which the description never mentions.
+// hasLaunchableInstance reports whether the challenge spins up an on-demand container.
 func hasLaunchableInstance(challenge *models.ChallengeDetailed) bool {
 	if strings.Contains(strings.ToLower(challenge.Type), "docker") {
 		return true
@@ -102,9 +101,7 @@ func hasLaunchableInstance(challenge *models.ChallengeDetailed) bool {
 		strings.Contains(challenge.View, "whale-panel")
 }
 
-// SaveChallengeView writes the server-rendered challenge HTML (CTFd's "view"
-// field) so nothing shown in the challenge modal is lost, e.g. an on-demand
-// instance launcher that isn't part of the description.
+// SaveChallengeView writes CTFd's rendered "view" HTML so nothing in the modal is lost.
 func (fs *FileSystemService) SaveChallengeView(challenge *models.ChallengeDetailed, challengeDir string) error {
 	if strings.TrimSpace(challenge.View) == "" {
 		return nil

@@ -113,7 +113,7 @@ func NewCTFdClient(config *ClientConfig) (*CTFdClient, error) {
 	}, nil
 }
 
-// auth attaches the token (preferred) or session cookie to a request.
+// auth attaches the token or session cookie.
 func (c *CTFdClient) auth(r *resty.Request) *resty.Request {
 	switch {
 	case c.token != "":
@@ -132,7 +132,6 @@ func cookieHeader(cookie string) string {
 	return "session=" + cookie
 }
 
-// apiReq returns an authenticated request for CTFd API calls.
 func (c *CTFdClient) apiReq() *resty.Request {
 	return c.auth(c.client.R())
 }

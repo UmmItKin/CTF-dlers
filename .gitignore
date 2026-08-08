@@ -31,6 +31,9 @@ go.work.sum
 # .idea/
 # .vscode/
 
-challenges
-CTF-dlers
+# Build output and downloaded challenges (not source)
+/CTF-dlers
+/dist/
+/challenges/
+/output/
 *.tar.gz

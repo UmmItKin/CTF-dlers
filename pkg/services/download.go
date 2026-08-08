@@ -24,15 +24,12 @@ type DownloadService struct {
 	progress   func(done, total int, result models.DownloadResult)
 }
 
-// SetProgressHook registers an optional callback fired once per finished
-// challenge. When set, per-result logging is suppressed so a caller can render
-// its own UI.
+// SetProgressHook fires per finished challenge; when set, per-result logging is suppressed.
 func (ds *DownloadService) SetProgressHook(fn func(done, total int, result models.DownloadResult)) {
 	ds.progress = fn
 }
 
-// logf logs only when no progress hook owns the display, so log lines never
-// corrupt a caller's live UI.
+// logf logs only when no progress hook owns the display.
 func (ds *DownloadService) logf(format string, args ...interface{}) {
 	if ds.progress == nil {
 		log.Printf(format, args...)
@@ -171,8 +168,7 @@ func (ds *DownloadService) DownloadAllChallenges(ctx context.Context) (*models.D
 
 	finalStats := ds.getStats()
 
-	// The drain loop can end normally when workers stop on cancellation, so
-	// report the cancellation explicitly rather than a bogus "success".
+	// drain loop ends normally when workers stop on cancel; report it, not success
 	if err := ctx.Err(); err != nil {
 		return finalStats, err
 	}
@@ -268,15 +264,13 @@ func (ds *DownloadService) downloadChallenge(ctx context.Context, challenge *mod
 
 	result.OutputPath = challengeDir
 
-	// CTFd's own files, plus attachment links embedded in the description
-	// (some CTFs list files there instead of in the files field).
+	// CTFd's own files plus attachment links in the description (some CTFs list them there)
 	fileURLs := append([]string{}, challengeDetail.Files...)
 	for _, u := range utils.ExtractAttachmentURLs(challengeDetail.Description) {
 		if err := ds.limiter.Wait(ctx); err != nil {
 			return err
 		}
-		// ponytail: 250MB cap on description links so a stray installer/tooling
-		// link can't run away; add a -max-file-size flag if this bites real files.
+		// ponytail: 250MB cap on description links; add -max-file-size if it bites real files
 		if size, err := ds.client.FileSize(u); err == nil && size > 250<<20 {
 			ds.logf("Skipping large attachment (%s): %s", formatBytes(size), u)
 			continue

@@ -3,10 +3,12 @@
 
 # CTFd instance settings
 base_url: "https://demo.ctfd.io"
-token: "ctfd_your_token_here"
+token: "ctfd_your_token_here"     # or set cookie for token-less instances
+# cookie: "<session cookie>"
 
 # Download settings
-output_dir: "./challenges"
+ctf_name: "my-ctf-2026"           # challenges go under output/<ctf_name>/
+output_dir: "output"
 max_workers: 5
 rate_limit: 10  # requests per second
 

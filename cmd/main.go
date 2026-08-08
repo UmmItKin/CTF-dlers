@@ -51,7 +51,8 @@ var (
 	baseURL       = flag.String("url", "", "CTFd base URL (required)")
 	token         = flag.String("token", "", "CTFd access token (or use -cookie)")
 	cookie        = flag.String("cookie", "", "CTFd session cookie, e.g. from your browser (alternative to -token)")
-	outputDir     = flag.String("output", "./challenges", "Output directory for challenges")
+	ctfName       = flag.String("ctf-name", "", "Competition name; challenges go under <output>/<ctf-name>/ (required to download)")
+	outputDir     = flag.String("output", "output", "Base output directory")
 	configFile    = flag.String("config", "", "Configuration file path")
 	workers       = flag.Int("workers", 5, "Number of concurrent workers")
 	rateLimit     = flag.Int("rate-limit", 10, "Rate limit (requests per second)")
@@ -115,6 +116,12 @@ func main() {
 		log.Println("Connection test successful!")
 		return
 	}
+
+	// A competition name is required so challenges land in output/<ctf-name>/.
+	if config.CTFName == "" {
+		log.Fatalf("Configuration error: -ctf-name is required (e.g. -ctf-name scriptctf-2026)")
+	}
+	config.OutputDir = filepath.Join(config.OutputDir, utils.SanitizeName(config.CTFName))
 
 	filesystem := services.NewFileSystemService(config.OutputDir)
 
@@ -181,8 +188,7 @@ func main() {
 	}
 }
 
-// promptTarball offers to bundle the whole output dir into a .tar.gz to share
-// with teammates. It stays interruptible: a SIGINT (ctx cancel) aborts the wait.
+// promptTarball offers to bundle the output dir into a .tar.gz; SIGINT aborts the wait.
 func promptTarball(ctx context.Context, outputDir string) {
 	fmt.Print("\nTarball all challenges to send to your team? [y/N] ")
 
@@ -267,8 +273,7 @@ func createTarball(srcDir, outFile string) (err error) {
 	return gz.Close()
 }
 
-// runWithDashboard drives the download while rendering a live progress bar and
-// returns the per-challenge results plus the download error (if any).
+// runWithDashboard drives the download behind a live progress bar.
 func runWithDashboard(ctx context.Context, ds *services.DownloadService) ([]models.DownloadResult, error) {
 	pw := progress.NewWriter()
 	pw.SetAutoStop(false)
@@ -283,9 +288,8 @@ func runWithDashboard(ctx context.Context, ds *services.DownloadService) ([]mode
 
 	tracker := &progress.Tracker{Message: "Downloading", Units: progress.UnitsDefault}
 
-	// Start rendering only once the total is known (first hook, done==0), so the
-	// bar never shows "???" during the initial challenge-list fetch.
-	var rows []models.DownloadResult // appended from the drain goroutine only
+	// render only once the total is known (done==0), so the bar never shows "???"
+	var rows []models.DownloadResult
 	started := false
 	ds.SetProgressHook(func(done, total int, r models.DownloadResult) {
 		if !started {
@@ -321,8 +325,7 @@ func runWithDashboard(ctx context.Context, ds *services.DownloadService) ([]mode
 	return rows, err
 }
 
-// styledTable returns a rounded table with bold cyan title, bold header and
-// dimmed borders — the shared look for both summary tables.
+// styledTable returns the shared rounded/colored table used for both summaries.
 func styledTable(title string) table.Writer {
 	t := table.NewWriter()
 	t.SetOutputMirror(os.Stdout)
@@ -416,6 +419,9 @@ func loadConfig() (*models.Config, error) {
 	if set["cookie"] {
 		config.Cookie = *cookie
 	}
+	if set["ctf-name"] {
+		config.CTFName = *ctfName
+	}
 	if set["output"] {
 		config.OutputDir = *outputDir
 	}
@@ -480,6 +486,9 @@ func mergeConfigs(base, override *models.Config) {
 	}
 	if override.Cookie != "" {
 		base.Cookie = override.Cookie
+	}
+	if override.CTFName != "" {
+		base.CTFName = override.CTFName
 	}
 	if override.OutputDir != "" {
 		base.OutputDir = override.OutputDir
