@@ -198,6 +198,19 @@ func (c *CTFdClient) GetChallenge(challengeID int) (*models.ChallengeDetailed, e
 	return &result.Data, nil
 }
 
+// FileSize returns the Content-Length of a URL via HEAD, or -1 if unknown.
+func (c *CTFdClient) FileSize(fileURL string) (int64, error) {
+	resp, err := c.fileReq(fileURL).Head(fileURL)
+	if err != nil {
+		return 0, err
+	}
+	cl := resp.Header().Get("Content-Length")
+	if cl == "" {
+		return -1, nil
+	}
+	return strconv.ParseInt(cl, 10, 64)
+}
+
 func (c *CTFdClient) DownloadFileToWriter(fileURL string, writer io.Writer) error {
 	resp, err := c.fileReq(fileURL).
 		SetDoNotParseResponse(true).

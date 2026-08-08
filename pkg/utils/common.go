@@ -54,6 +54,26 @@ func ExtractFilenameFromURL(fileURL string) (string, error) {
 	return filename, nil
 }
 
+var mdLinkRe = regexp.MustCompile(`\[[^\]]*\]\((https?://[^)\s]+)\)`)
+
+// ExtractAttachmentURLs pulls direct file links out of a markdown description
+// (some CTFs list attachments there instead of in CTFd's files field). Viewer
+// links that aren't direct downloads (Google Drive, localhost) are skipped.
+func ExtractAttachmentURLs(description string) []string {
+	var out []string
+	seen := map[string]bool{}
+	for _, m := range mdLinkRe.FindAllStringSubmatch(description, -1) {
+		u := m[1]
+		low := strings.ToLower(u)
+		if seen[u] || strings.Contains(low, "drive.google.com") || strings.Contains(low, "localhost") {
+			continue
+		}
+		seen[u] = true
+		out = append(out, u)
+	}
+	return out
+}
+
 func FormatBytes(bytes int64) string {
 	const unit = 1024
 	if bytes < unit {

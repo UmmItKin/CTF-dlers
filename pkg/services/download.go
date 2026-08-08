@@ -268,9 +268,25 @@ func (ds *DownloadService) downloadChallenge(ctx context.Context, challenge *mod
 
 	result.OutputPath = challengeDir
 
+	// CTFd's own files, plus attachment links embedded in the description
+	// (some CTFs list files there instead of in the files field).
+	fileURLs := append([]string{}, challengeDetail.Files...)
+	for _, u := range utils.ExtractAttachmentURLs(challengeDetail.Description) {
+		if err := ds.limiter.Wait(ctx); err != nil {
+			return err
+		}
+		// ponytail: 250MB cap on description links so a stray installer/tooling
+		// link can't run away; add a -max-file-size flag if this bites real files.
+		if size, err := ds.client.FileSize(u); err == nil && size > 250<<20 {
+			ds.logf("Skipping large attachment (%s): %s", formatBytes(size), u)
+			continue
+		}
+		fileURLs = append(fileURLs, u)
+	}
+
 	var fileInfos []models.FileInfo
-	if len(challengeDetail.Files) > 0 {
-		fileInfos, err = ds.downloadChallengeFiles(ctx, challengeDetail.Files, challengeDir)
+	if len(fileURLs) > 0 {
+		fileInfos, err = ds.downloadChallengeFiles(ctx, fileURLs, challengeDir)
 		if err != nil {
 			return fmt.Errorf("failed to download files: %w", err)
 		}
@@ -319,7 +335,7 @@ func (ds *DownloadService) downloadChallenge(ctx context.Context, challenge *mod
 		return fmt.Errorf("failed to save README: %w", err)
 	}
 
-	ds.commitFileStats(len(challengeDetail.Files), fileInfos)
+	ds.commitFileStats(len(fileURLs), fileInfos)
 
 	return nil
 }
