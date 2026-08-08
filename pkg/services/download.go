@@ -335,6 +335,10 @@ func (ds *DownloadService) downloadChallenge(ctx context.Context, challenge *mod
 		return fmt.Errorf("failed to save README: %w", err)
 	}
 
+	if err := ds.filesystem.SaveChallengeView(challengeDetail, challengeDir); err != nil {
+		return fmt.Errorf("failed to save view: %w", err)
+	}
+
 	ds.commitFileStats(len(fileURLs), fileInfos)
 
 	return nil

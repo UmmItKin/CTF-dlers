@@ -92,6 +92,30 @@ func (fs *FileSystemService) SaveChallengeREADME(challenge *models.ChallengeDeta
 	return nil
 }
 
+// hasLaunchableInstance reports whether the challenge spins up an on-demand
+// container (ctfd-whale and similar), which the description never mentions.
+func hasLaunchableInstance(challenge *models.ChallengeDetailed) bool {
+	if strings.Contains(strings.ToLower(challenge.Type), "docker") {
+		return true
+	}
+	return strings.Contains(challenge.View, "Launch an instance") ||
+		strings.Contains(challenge.View, "whale-panel")
+}
+
+// SaveChallengeView writes the server-rendered challenge HTML (CTFd's "view"
+// field) so nothing shown in the challenge modal is lost, e.g. an on-demand
+// instance launcher that isn't part of the description.
+func (fs *FileSystemService) SaveChallengeView(challenge *models.ChallengeDetailed, challengeDir string) error {
+	if strings.TrimSpace(challenge.View) == "" {
+		return nil
+	}
+	viewPath := filepath.Join(challengeDir, "view.html")
+	if err := os.WriteFile(viewPath, []byte(challenge.View), 0644); err != nil {
+		return fmt.Errorf("failed to save view: %w", err)
+	}
+	return nil
+}
+
 func (fs *FileSystemService) DownloadFile(fileURL, challengeDir string, downloader func(string, io.Writer) error) (models.FileInfo, error) {
 	filename, err := utils.ExtractFilenameFromURL(fileURL)
 	if err != nil {
@@ -241,6 +265,15 @@ func (fs *FileSystemService) generateREADMEContent(challenge *models.ChallengeDe
 			content.WriteString(fmt.Sprintf("- [%s](./%s) (%s)\n", fileInfo.Name, fileInfo.Path, utils.FormatBytes(fileInfo.Size)))
 		}
 		content.WriteString("\n")
+	}
+
+	if hasLaunchableInstance(challenge) {
+		content.WriteString("## Instance\n\n")
+		content.WriteString("This challenge runs an on-demand instance you launch on the CTF site.\n\n")
+	}
+
+	if strings.TrimSpace(challenge.View) != "" {
+		content.WriteString("Full rendered challenge (including any instance panel): [view.html](./view.html)\n\n")
 	}
 
 	if challenge.MaxAttempts > 0 {
