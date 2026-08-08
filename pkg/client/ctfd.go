@@ -34,11 +34,13 @@ type CTFdClient struct {
 	client   *resty.Client
 	baseHost string
 	token    string
+	cookie   string
 }
 
 type ClientConfig struct {
 	BaseURL    string
 	Token      string
+	Cookie     string // CTFd session cookie, alternative to Token
 	Timeout    time.Duration
 	UserAgent  string
 	RateLimit  int
@@ -67,8 +69,8 @@ func NewCTFdClient(config *ClientConfig) (*CTFdClient, error) {
 		return nil, fmt.Errorf("base URL is required")
 	}
 
-	if config.Token == "" {
-		return nil, fmt.Errorf("authentication token is required")
+	if config.Token == "" && config.Cookie == "" {
+		return nil, fmt.Errorf("authentication is required: set a token or a session cookie")
 	}
 
 	parsed, err := url.ParseRequestURI(config.BaseURL)
@@ -107,19 +109,39 @@ func NewCTFdClient(config *ClientConfig) (*CTFdClient, error) {
 		client:   client,
 		baseHost: parsed.Host,
 		token:    config.Token,
+		cookie:   config.Cookie,
 	}, nil
+}
+
+// auth attaches the token (preferred) or session cookie to a request.
+func (c *CTFdClient) auth(r *resty.Request) *resty.Request {
+	switch {
+	case c.token != "":
+		r.SetHeader(authorizationHeader, "Bearer "+c.token)
+	case c.cookie != "":
+		r.SetHeader("Cookie", cookieHeader(c.cookie))
+	}
+	return r
+}
+
+// cookieHeader accepts either a raw session value or a full "name=value" pair.
+func cookieHeader(cookie string) string {
+	if strings.Contains(cookie, "=") {
+		return cookie
+	}
+	return "session=" + cookie
 }
 
 // apiReq returns an authenticated request for CTFd API calls.
 func (c *CTFdClient) apiReq() *resty.Request {
-	return c.client.R().SetHeader(authorizationHeader, "Bearer "+c.token)
+	return c.auth(c.client.R())
 }
 
-// fileReq attaches the token only for same-host or relative download URLs.
+// fileReq attaches auth only for same-host or relative download URLs.
 func (c *CTFdClient) fileReq(fileURL string) *resty.Request {
 	r := c.client.R()
 	if u, err := url.Parse(fileURL); err == nil && (u.Host == "" || strings.EqualFold(u.Host, c.baseHost)) {
-		r.SetHeader(authorizationHeader, "Bearer "+c.token)
+		c.auth(r)
 	}
 	return r
 }

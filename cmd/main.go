@@ -49,7 +49,8 @@ func printBanner() {
 
 var (
 	baseURL       = flag.String("url", "", "CTFd base URL (required)")
-	token         = flag.String("token", "", "CTFd access token (required)")
+	token         = flag.String("token", "", "CTFd access token (or use -cookie)")
+	cookie        = flag.String("cookie", "", "CTFd session cookie, e.g. from your browser (alternative to -token)")
 	outputDir     = flag.String("output", "./challenges", "Output directory for challenges")
 	configFile    = flag.String("config", "", "Configuration file path")
 	workers       = flag.Int("workers", 5, "Number of concurrent workers")
@@ -93,6 +94,7 @@ func main() {
 	clientConfig := &client.ClientConfig{
 		BaseURL:    config.BaseURL,
 		Token:      config.Token,
+		Cookie:     config.Cookie,
 		Timeout:    30 * time.Second,
 		RateLimit:  config.RateLimit,
 		RetryCount: config.RetryCount,
@@ -411,6 +413,9 @@ func loadConfig() (*models.Config, error) {
 	if set["token"] {
 		config.Token = *token
 	}
+	if set["cookie"] {
+		config.Cookie = *cookie
+	}
 	if set["output"] {
 		config.OutputDir = *outputDir
 	}
@@ -443,6 +448,11 @@ func loadConfig() (*models.Config, error) {
 			config.Token = envToken
 		}
 	}
+	if config.Cookie == "" {
+		if envCookie := os.Getenv("CTFD_COOKIE"); envCookie != "" {
+			config.Cookie = envCookie
+		}
+	}
 
 	return config, nil
 }
@@ -467,6 +477,9 @@ func mergeConfigs(base, override *models.Config) {
 	}
 	if override.Token != "" {
 		base.Token = override.Token
+	}
+	if override.Cookie != "" {
+		base.Cookie = override.Cookie
 	}
 	if override.OutputDir != "" {
 		base.OutputDir = override.OutputDir
@@ -495,8 +508,8 @@ func validateConfig(config *models.Config) error {
 	if config.BaseURL == "" {
 		return fmt.Errorf("CTFd base URL is required (use -url flag or CTFD_URL environment variable)")
 	}
-	if config.Token == "" {
-		return fmt.Errorf("CTFd access token is required (use -token flag or CTFD_TOKEN environment variable)")
+	if config.Token == "" && config.Cookie == "" {
+		return fmt.Errorf("authentication is required: use -token/CTFD_TOKEN or -cookie/CTFD_COOKIE")
 	}
 	if config.MaxWorkers < 1 {
 		return fmt.Errorf("number of workers must be at least 1")

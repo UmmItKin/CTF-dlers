@@ -5,6 +5,7 @@ import "time"
 type Config struct {
 	BaseURL       string `yaml:"base_url" json:"base_url"`
 	Token         string `yaml:"token" json:"token"`
+	Cookie        string `yaml:"cookie" json:"cookie"`
 	OutputDir     string `yaml:"output_dir" json:"output_dir"`
 	MaxWorkers    int    `yaml:"max_workers" json:"max_workers"`
 	RateLimit     int    `yaml:"rate_limit" json:"rate_limit"`
